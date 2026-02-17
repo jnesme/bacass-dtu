@@ -22,11 +22,25 @@ Outputs (written inside *out_dir*)
 The compressed file names match those produced by the original
 implementation, so downstream workflow steps continue to work
 unchanged.
+
+Change log
+----------
+2026-02-16  Fix two bugs that caused BadZipFile on NCBI download:
+    1.  Strip assembly-name suffix from accessions produced by kmerfinder.
+        Kmerfinder reports e.g. "GCF_003345295.1_ASM334529v1" (accession +
+        assembly name) but the NCBI Datasets API expects just "GCF_003345295.1".
+        With the suffix, the API returns HTTP 200 but an empty / malformed zip.
+        **Rollback**: revert `_clean_accession()` and its call in `main()`.
+    2.  Remove PROTEIN_FASTA from annotation request sets.  The NCBI Datasets
+        v2alpha API no longer accepts it, so the first (most complete) fallback
+        always returned HTTP 400, masking the real accession problem.
+        **Rollback**: restore PROTEIN_FASTA to `_ANNO_SETS[0]`.
 """
 from __future__ import annotations
 
 import argparse
 import gzip
+import re
 import shutil
 import sys
 import urllib3
@@ -39,7 +53,6 @@ from typing import Dict, List
 # Annotation request combinations (most → least detailed)
 # -----------------------------------------------------------------------------
 _ANNO_SETS: List[List[str]] = [
-    ["GENOME_FASTA", "GENOME_GFF", "PROTEIN_FASTA"],
     ["GENOME_FASTA", "GENOME_GFF"],
     ["GENOME_FASTA"],
 ]
@@ -55,6 +68,22 @@ _SUFFIX_MAP: Dict[str, str] = {
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
+
+
+_ACCESSION_RE = re.compile(r"(GC[AF]_\d+\.\d+)")
+
+
+def _clean_accession(raw: str) -> str:
+    """Extract the bare GCF/GCA accession from a kmerfinder assembly string.
+
+    Kmerfinder reports accessions with the assembly name appended, e.g.
+    ``GCF_003345295.1_ASM334529v1``.  The NCBI Datasets API expects just
+    ``GCF_003345295.1`` — with the suffix it returns an empty/malformed zip.
+    """
+    m = _ACCESSION_RE.match(raw)
+    if m:
+        return m.group(1)
+    return raw
 
 
 def _datasets_url(acc: str, anno_types: List[str]) -> str:
@@ -73,7 +102,16 @@ def _fetch_dataset(acc: str) -> BytesIO:
         resp = http.request("GET", url, preload_content=False)
         if resp.status == 200:
             resp.auto_close = False
-            return BytesIO(resp.data)
+            buf = BytesIO(resp.data)
+            if not zipfile.is_zipfile(buf):
+                print(
+                    f"[WARN] NCBI returned HTTP 200 but not a valid zip for "
+                    f"{acc} with {anno} ({len(buf.getvalue())} bytes). Trying next fallback.",
+                    file=sys.stderr,
+                )
+                continue
+            buf.seek(0)
+            return buf
         elif resp.status == 400:
             # Try next (simpler) request
             continue
@@ -139,7 +177,13 @@ def main(argv: list[str] | None = None):
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    acc = _winner_from_tsv(Path(args.file))
+    raw_acc = _winner_from_tsv(Path(args.file))
+    acc = _clean_accession(raw_acc)
+    if acc != raw_acc:
+        print(
+            f"[INFO] Stripped assembly name: {raw_acc} → {acc}",
+            file=sys.stderr,
+        )
     (out_dir / f"{acc}.winner").write_text(acc + "\n")
 
     zip_bytes: BytesIO | None = None

@@ -1,0 +1,8 @@
+name: deepbgc_pipeline
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - bioconda::deepbgc=0.1.31
+  - bioconda::pyhmmer<0.12
