@@ -20,7 +20,11 @@ process KRAKEN2_DB_PREPARATION {
     script:
     """
     mkdir db_tmp
-    tar -xf "${db}" -C db_tmp
+    if [ -d "${db}" ]; then
+        cp -r "${db}/." db_tmp/
+    else
+        tar -xf "${db}" -C db_tmp
+    fi
     mkdir database
     mv `find db_tmp/ -name "*.k2d"` database/
 
