@@ -100,7 +100,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | Submit rate limit | 25 jobs/min |
 | Poll interval | 30 sec |
 | `-resume` | enabled |
-| `--unicycler_args` | `"--mode bold --no_correct"` (2-3x faster) |
+| `--unicycler_args` | `""` (not set by default) |
 
 ### I/O performance (`conf/modules.config`)
 
@@ -298,7 +298,7 @@ process TOOLNAME {
 - `--polish_method`: `medaka` (default), `nanopolish`
 - `--kraken2db`: path to Kraken2 database (`.tgz` or directory)
 - `--kmerfinderdb`: path to Kmerfinder database
-- `--unicycler_args`: extra args passed to Unicycler (e.g., `"--mode bold --no_correct"` for faster assembly)
+- `--unicycler_args`: extra args passed to Unicycler (e.g., `"--mode bold"` for faster assembly)
 - `--skip_*`: skip individual steps (`--skip_kraken2`, `--skip_busco`, `--skip_annotation`, etc.)
 
 ## Testing
@@ -390,7 +390,7 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **"conda: command not found"** in bsub job: ensure `#!/bin/bash` shebang and that `setup.sh` sources `conda.sh` before `conda activate`
 - **"Run conda init first"**: `conda.sh` must be sourced before `conda activate` — already handled in `setup.sh`
 - **Lock file error after killed job**: delete `.nextflow/cache/*/db/LOCK` and re-run with `-resume`
-- **SPAdes/Unicycler slow**: `scratch = true` is already set in modules.config; also consider `--unicycler_args "--mode bold --no_correct"` for 2-3x speedup
+- **SPAdes/Unicycler slow**: `scratch = true` is already set in modules.config; also consider `--unicycler_args "--mode bold"` for faster assembly
 - **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta, GECCO, DeepBGC): pyhmmer >=0.12 broke all three tools. Fixed via custom environment YAMLs that pin `pyhmmer<0.12`: `conf/bakta_environment.yml` (applied through `conf/modules.config`), `conf/gecco_environment.yml` and `conf/deepbgc_environment.yml` (applied through `conf/funcscan_overrides.config` passed with `-c` in `submit_funcscan.sh`)
 - **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction

@@ -76,7 +76,6 @@ nextflow run "${BACASS_DIR}" \
     --assembly_type "${ASSEMBLY_TYPE}" \
     --kraken2db "${BACASS_KRAKEN2DB}" \
     --kmerfinderdb "${BACASS_KMERFINDERDB}" \
-    --unicycler_args "--mode bold --no_correct" \
     --annotation_tool bakta \
     --baktadb "${BACASS_BAKTADB}" \
     -resume
