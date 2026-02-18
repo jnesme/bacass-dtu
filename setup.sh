@@ -26,7 +26,7 @@ export NXF_CONDA_CACHEDIR="${BACASS_DIR}/.conda_envs"
 mkdir -p "${NXF_CONDA_CACHEDIR}"
 
 # --- Databases ---
-export BACASS_KRAKEN2DB="${BACASS_DIR}/assets/databases/minikraken2_v2_8GB_201904.tgz"
+export BACASS_KRAKEN2DB="${BACASS_DIR}/assets/databases/minikraken2_v2_8GB_201904_UPDATE"
 export BACASS_KMERFINDERDB="${BACASS_DIR}/assets/databases/kmerfinder_20190108_stable_dirs/bacteria"
 export BACASS_BAKTADB="${BACASS_DIR}/assets/databases/bakta_db"
 
