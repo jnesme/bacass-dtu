@@ -77,9 +77,11 @@ All processes run on one node. Nextflow uses the local executor.
 | Output | `bacass_<JOBID>.out` / `.err` |
 | `-resume` | enabled (user added it) |
 
-#### Critical: `perJobMemLimit = true` is mandatory for LSF
+#### Critical: do NOT set `perJobMemLimit = true` for LSF
 
-**Always keep `perJobMemLimit = true` in `conf/lsf.config`.** Without it, Nextflow passes the total memory as `rusage[mem=X]`, which LSF interprets as **per-slot** — multiplying by CPU count. A 16-CPU / 80 GB job ends up reserving 1280 GB, schedulable on only the 2 largest nodes in the cluster. Jobs sit PEND indefinitely with no error message. This setting makes Nextflow divide total memory by CPUs before passing to LSF so the reservation is correct.
+**Never set `perJobMemLimit = true` in `conf/lsf.config` for DTU HPC.** The default (`false`) is what divides total memory by CPUs before passing to LSF `rusage[mem=X]`, giving the correct per-slot reservation. Setting `true` **disables** the division — Nextflow passes the full job memory as per-slot, and LSF multiplies by CPU count. A 16-CPU / 80 GB job ends up reserving 1280 GB, which exceeds the queue's per-job memory limit (~1.07 TB) and can't schedule on any node. Jobs sit PEND indefinitely.
+
+**Bytecode-verified** (NF 25.10.4 `LsfExecutor.class`): `shouldDivide = !perJobMemLimit`. So `false` = divide = correct for standard per-slot LSF. `true` = don't divide = only correct for LSF clusters where `LSB_JOB_MEMLIMIT=Y` configures `rusage` as per-job total (DTU HPC does not use this).
 
 #### Distributed (`submit_bacass_distributed.sh`)
 
@@ -92,7 +94,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | LSF executor config | `conf/lsf.config` |
 | Queue | `hpc` |
 | Max concurrent jobs | 20 (keeps ~320 cores peak) |
-| `perJobMemLimit` | `true` — Nextflow divides total memory by CPUs before passing to LSF `rusage[mem=X]`, so LSF sees per-slot memory rather than total (avoids 16× over-reservation) |
+| `perJobMemLimit` | not set (default `false`) — Nextflow divides total memory by CPUs before passing to LSF `rusage[mem=X]`, giving correct per-slot reservation. Setting `true` disables division and causes 16× over-reservation. |
 | Submit rate limit | 25 jobs/min |
 | Poll interval | 30 sec |
 | `-resume` | enabled |
@@ -391,5 +393,5 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
 - **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
-- **Jobs stuck PEND indefinitely, only 2 nodes eligible**: Nextflow passes total memory directly as `rusage[mem=X]` in LSF, which LSF interprets as **per-slot** — multiplying by CPU count. A 16-CPU / 80 GB job reserves 1280 GB, runnable on only the 2 largest nodes. Fix: `perJobMemLimit = true` in the `executor` block of `conf/lsf.config`. This makes Nextflow divide total memory by CPUs before passing to LSF so the reservation is correct.
+- **Unicycler jobs stuck PEND — "resource reservation not satisfied" or "queue mem limit reached"**: root cause is `perJobMemLimit = true` in `conf/lsf.config`. In NF 25.x, `perJobMemLimit = true` **disables** CPU-based division (`shouldDivide = !perJobMemLimit` in the bytecode), so LSF receives the full 80 GB as per-slot — multiplying by 16 CPUs = 1280 GB total, which exceeds the ~1.07 TB queue limit. Fix: remove `perJobMemLimit = true` (the default `false` restores correct division). Kill the head job and resubmit with `-resume`.
 - **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode can burn fairshare and drop priority significantly. Resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM) to reduce fairshare consumption. If already stuck: kill everything and resubmit with `-resume` after priority recovers.
