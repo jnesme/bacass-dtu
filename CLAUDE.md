@@ -77,9 +77,13 @@ All processes run on one node. Nextflow uses the local executor.
 | Output | `bacass_<JOBID>.out` / `.err` |
 | `-resume` | enabled (user added it) |
 
+#### Critical: `perJobMemLimit = true` is mandatory for LSF
+
+**Always keep `perJobMemLimit = true` in `conf/lsf.config`.** Without it, Nextflow passes the total memory as `rusage[mem=X]`, which LSF interprets as **per-slot** — multiplying by CPU count. A 16-CPU / 80 GB job ends up reserving 1280 GB, schedulable on only the 2 largest nodes in the cluster. Jobs sit PEND indefinitely with no error message. This setting makes Nextflow divide total memory by CPUs before passing to LSF so the reservation is correct.
+
 #### Distributed (`submit_bacass_distributed.sh`)
 
-Nextflow runs as a lightweight head process and submits each pipeline task as a separate bsub job via the LSF executor. Tuned for 100+ genome runs: queue size is capped at 20 concurrent jobs (~320 cores peak) to avoid hammering the cluster fairshare, and Unicycler runs in bold/no-correct mode for 2-3x faster assemblies.
+Nextflow runs as a lightweight head process and submits each pipeline task as a separate bsub job via the LSF executor. Tuned for 100+ genome runs: queue size is capped at 8 concurrent jobs to avoid hammering the cluster fairshare, and Unicycler runs in bold/no-correct mode for 2-3x faster assemblies.
 
 | Setting | Value |
 |---|---|
