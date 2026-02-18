@@ -45,7 +45,7 @@ Tuned for DTU HPC's smallest nodes: **20 cores / 128 GB RAM** (47 Huawei XH620 V
 | `process_single` | 1 CPU / 6 GB / 4h | 1 CPU / 12 GB / 8h | cat/fastq, gunzip, untar, multiqc, bakta/dbdownload |
 | `process_low` | 4 CPU / 16 GB / 4h | 8 CPU / 32 GB / 8h | prokka, nanoplot, toulligqc, filtlong, samtools/index, kraken2/db_preparation, kmerfinder/summary |
 | `process_medium` | 8 CPU / 40 GB / 8h | 16 CPU / 80 GB / 16h | fastqc, fastp, pycoqc, porechop, dragonflye, minimap2, samtools/sort, quast, busco, bakta, dfast, kmerfinder, custom/multiqc |
-| `process_high` | 16 CPU / 80 GB / 16h | 20 CPU / 120 GB / 32h (capped) | unicycler, canu, nanopolish |
+| `process_high` | 16 CPU / 40 GB / 16h | 20 CPU / 80 GB / 32h | unicycler, canu, nanopolish |
 | `process_high_memory` | 120 GB | 120 GB (capped) | (unused currently) |
 
 **Per-process resource overrides** (in `conf/modules.config` — these override the label defaults):
