@@ -237,7 +237,17 @@ All resources are capped at **20 CPUs / 120 GB RAM** to fit DTU HPC's smallest n
 | `process_single` | 1 CPU / 6 GB | 1 CPU / 12 GB | cat/fastq, gunzip, untar, multiqc |
 | `process_low` | 4 CPU / 16 GB | 8 CPU / 32 GB | prokka, nanoplot, toulligqc, filtlong |
 | `process_medium` | 8 CPU / 40 GB | 16 CPU / 80 GB | fastqc, fastp, porechop, dragonflye, quast, busco, bakta, dfast, kmerfinder |
-| `process_high` | 16 CPU / 80 GB | **20 CPU / 120 GB** (capped) | unicycler, canu, miniasm, racon, medaka, nanopolish, kraken2, liftoff |
+| `process_high` | 16 CPU / 80 GB | **20 CPU / 120 GB** (capped) | unicycler, canu, nanopolish |
+
+Per-process overrides in `conf/modules.config` reduce resources for processes that don't benefit from high parallelism:
+
+| Process | CPUs | Memory | Reason |
+|---|---|---|---|
+| kraken2 | 8 | 40 GB | I/O-bound on DB load, doesn't scale past ~8 threads |
+| racon | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
+| medaka | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
+| liftoff | 8 | 40 GB | Annotation of small bacterial genomes, fast at 8 cores |
+| miniasm | 1 | 16 GB | Single-threaded — does not use multiple CPUs |
 
 ### Key parameters
 
