@@ -88,6 +88,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | LSF executor config | `conf/lsf.config` |
 | Queue | `hpc` |
 | Max concurrent jobs | 8 (keeps ~130 cores peak, fairshare-friendly) |
+| `perJobMemLimit` | `true` — Nextflow divides total memory by CPUs before passing to LSF `rusage[mem=X]`, so LSF sees per-slot memory rather than total (avoids 16× over-reservation) |
 | Submit rate limit | 25 jobs/min |
 | Poll interval | 30 sec |
 | `-resume` | enabled |
@@ -386,4 +387,5 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
 - **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
+- **Jobs stuck PEND indefinitely, only 2 nodes eligible**: Nextflow passes total memory directly as `rusage[mem=X]` in LSF, which LSF interprets as **per-slot** — multiplying by CPU count. A 16-CPU / 80 GB job reserves 1280 GB, runnable on only the 2 largest nodes. Fix: `perJobMemLimit = true` in the `executor` block of `conf/lsf.config`. This makes Nextflow divide total memory by CPUs before passing to LSF so the reservation is correct.
 - **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode burns ~479 CPU-hours and drops priority from ~16.6 to ~2.5. Recovery can take days. To avoid: (1) `queueSize = 8` in `conf/lsf.config` limits concurrent pending jobs; (2) resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM). If already stuck: kill the pending sub-jobs (not the head job) or kill everything and resubmit with `-resume` after priority recovers.
