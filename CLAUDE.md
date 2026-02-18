@@ -45,8 +45,18 @@ Tuned for DTU HPC's smallest nodes: **20 cores / 128 GB RAM** (47 Huawei XH620 V
 | `process_single` | 1 CPU / 6 GB / 4h | 1 CPU / 12 GB / 8h | cat/fastq, gunzip, untar, multiqc, bakta/dbdownload |
 | `process_low` | 4 CPU / 16 GB / 4h | 8 CPU / 32 GB / 8h | prokka, nanoplot, toulligqc, filtlong, samtools/index, kraken2/db_preparation, kmerfinder/summary |
 | `process_medium` | 8 CPU / 40 GB / 8h | 16 CPU / 80 GB / 16h | fastqc, fastp, pycoqc, porechop, dragonflye, minimap2, samtools/sort, quast, busco, bakta, dfast, kmerfinder, custom/multiqc |
-| `process_high` | 16 CPU / 80 GB / 16h | 20 CPU / 120 GB / 32h (capped) | unicycler, canu, miniasm, racon, medaka, nanopolish, kraken2, liftoff |
+| `process_high` | 16 CPU / 80 GB / 16h | 20 CPU / 120 GB / 32h (capped) | unicycler, canu, nanopolish |
 | `process_high_memory` | 120 GB | 120 GB (capped) | (unused currently) |
+
+**Per-process resource overrides** (in `conf/modules.config` — these override the label defaults):
+
+| Process | CPUs | Memory | Time | Reason |
+|---|---|---|---|---|
+| `KRAKEN2` | 8 | 40 GB | 8h | I/O-bound on DB load, doesn't scale past ~8 threads |
+| `RACON` | 8 | 40 GB | 8h | Moderate parallelism, 8 CPUs sufficient for bacterial genomes |
+| `MEDAKA` | 8 | 40 GB | 8h | 8 CPUs sufficient for bacterial genomes |
+| `LIFTOFF` | 8 | 40 GB | 8h | Annotation of small bacterial genomes, fast at 8 cores |
+| `MINIASM` | 1 | 16 GB | 8h | Single-threaded — does not pass `task.cpus` to the command |
 
 **Error handling**: retries on OOM/timeout exit codes (130-145, 104, 175). maxRetries = 1. Resources double on retry.
 
@@ -77,7 +87,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | Per-task resources | From base.config labels (up to 24 CPU / 128 GB) |
 | LSF executor config | `conf/lsf.config` |
 | Queue | `hpc` |
-| Max concurrent jobs | 20 (keeps ~320 cores peak, fairshare-friendly) |
+| Max concurrent jobs | 8 (keeps ~130 cores peak, fairshare-friendly) |
 | Submit rate limit | 25 jobs/min |
 | Poll interval | 30 sec |
 | `-resume` | enabled |
@@ -151,7 +161,7 @@ Funcscan uses the same distributed LSF executor pattern as bacass: a lightweight
 |---|---|---|
 | Head process | 1 core, 4 GB, 72h | Lightweight — only dispatches sub-jobs |
 | Per-task resources | From funcscan's process labels | Each tool gets its own LSF job with appropriate resources |
-| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 20 concurrent jobs, 25/min submit rate |
+| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 8 concurrent jobs, 25/min submit rate |
 | Conda env overrides | `conf/funcscan_overrides.config` | Pins `pyhmmer<0.12` for GECCO and DeepBGC via custom environment YAMLs |
 | Wall time | 72h | Head job must outlive all sub-jobs; 72h is max for `hpc` queue |
 | `-resume` | enabled | Safe to resubmit after interruption — skips completed tasks |
@@ -376,3 +386,4 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
 - **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
+- **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode burns ~479 CPU-hours and drops priority from ~16.6 to ~2.5. Recovery can take days. To avoid: (1) `queueSize = 8` in `conf/lsf.config` limits concurrent pending jobs; (2) resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM). If already stuck: kill the pending sub-jobs (not the head job) or kill everything and resubmit with `-resume` after priority recovers.
