@@ -91,7 +91,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | Per-task resources | From base.config labels (up to 24 CPU / 128 GB) |
 | LSF executor config | `conf/lsf.config` |
 | Queue | `hpc` |
-| Max concurrent jobs | 8 (keeps ~130 cores peak, fairshare-friendly) |
+| Max concurrent jobs | 20 (keeps ~320 cores peak) |
 | `perJobMemLimit` | `true` — Nextflow divides total memory by CPUs before passing to LSF `rusage[mem=X]`, so LSF sees per-slot memory rather than total (avoids 16× over-reservation) |
 | Submit rate limit | 25 jobs/min |
 | Poll interval | 30 sec |
@@ -166,7 +166,7 @@ Funcscan uses the same distributed LSF executor pattern as bacass: a lightweight
 |---|---|---|
 | Head process | 1 core, 4 GB, 72h | Lightweight — only dispatches sub-jobs |
 | Per-task resources | From funcscan's process labels | Each tool gets its own LSF job with appropriate resources |
-| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 8 concurrent jobs, 25/min submit rate |
+| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 20 concurrent jobs, 25/min submit rate |
 | Conda env overrides | `conf/funcscan_overrides.config` | Pins `pyhmmer<0.12` for GECCO and DeepBGC via custom environment YAMLs |
 | Wall time | 72h | Head job must outlive all sub-jobs; 72h is max for `hpc` queue |
 | `-resume` | enabled | Safe to resubmit after interruption — skips completed tasks |
@@ -392,4 +392,4 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
 - **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
 - **Jobs stuck PEND indefinitely, only 2 nodes eligible**: Nextflow passes total memory directly as `rusage[mem=X]` in LSF, which LSF interprets as **per-slot** — multiplying by CPU count. A 16-CPU / 80 GB job reserves 1280 GB, runnable on only the 2 largest nodes. Fix: `perJobMemLimit = true` in the `executor` block of `conf/lsf.config`. This makes Nextflow divide total memory by CPUs before passing to LSF so the reservation is correct.
-- **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode burns ~479 CPU-hours and drops priority from ~16.6 to ~2.5. Recovery can take days. To avoid: (1) `queueSize = 8` in `conf/lsf.config` limits concurrent pending jobs; (2) resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM). If already stuck: kill the pending sub-jobs (not the head job) or kill everything and resubmit with `-resume` after priority recovers.
+- **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode can burn fairshare and drop priority significantly. Resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM) to reduce fairshare consumption. If already stuck: kill everything and resubmit with `-resume` after priority recovers.
