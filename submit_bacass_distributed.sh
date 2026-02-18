@@ -45,6 +45,10 @@ if [ ! -f "${INPUT}" ]; then
     exit 1
 fi
 
+# Always run from BACASS_DIR so .nextflow/ cache is in a consistent location
+# (enables -resume to work regardless of where bsub was called from)
+cd "${BACASS_DIR}" || exit 1
+
 # Load environment (conda, nextflow, database paths)
 source "${BACASS_DIR}/setup.sh"
 
