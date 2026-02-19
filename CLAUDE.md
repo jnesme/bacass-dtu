@@ -77,13 +77,17 @@ All processes run on one node. Nextflow uses the local executor.
 | Output | `bacass_<JOBID>.out` / `.err` |
 | `-resume` | enabled (user added it) |
 
-#### Critical: do NOT set `perJobMemLimit = true` for LSF
+#### Critical: LSF memory reservation in NF 25.10.4
 
-**Never set `perJobMemLimit = true` in `conf/lsf.config` for DTU HPC.** The default (`false`) is what divides total memory by CPUs before passing to LSF `rusage[mem=X]`, giving the correct per-slot reservation. Setting `true` **disables** the division — Nextflow passes the full job memory as per-slot, and LSF multiplies by CPU count. A 16-CPU / 80 GB job ends up reserving 1280 GB, which exceeds the queue's per-job memory limit (~1.07 TB) and can't schedule on any node. Jobs sit PEND indefinitely.
+**NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs** — only `-M` (the kill limit) is divided. This means a 16-CPU / 40 GB job auto-generates `rusage[mem=40960]` per slot, so LSF tries to reserve 40960 MB × 16 = 640 GB on one node. No 128 GB node can satisfy this, causing jobs to PEND with "Resource (mem) limit defined on queue has been reached."
 
-**Bytecode-verified** (NF 25.10.4 `LsfExecutor.class`): `shouldDivide = !perJobMemLimit`. So `false` = divide = correct for standard per-slot LSF. `true` = don't divide = only correct for LSF clusters where `LSB_JOB_MEMLIMIT=Y` configures `rusage` as per-job total (DTU HPC does not use this).
+**Two complementary fixes are applied:**
 
-**NF 25.x default is `true`** — must be set explicitly to `false` in `conf/lsf.config`. Omitting it produces `rusage[mem=81920]` (full 80 GB per slot) for a 16-CPU job instead of `rusage[mem=5120]` (5 GB per slot). Tell-tale sign: `-M` is correctly divided but `rusage` is not.
+1. **Shadow lsf.conf** (`setup.sh`): DTU HPC's `/lsf/conf/lsf.conf` has `LSB_JOB_MEMLIMIT=Y`. NF 25.x auto-detects this and, via `shouldDivide = !(perJobMemLimit || lsbJobMemLimit)`, keeps `shouldDivide=false` even when `perJobMemLimit=false` is set. `setup.sh` generates a shadow copy with `LSB_JOB_MEMLIMIT=N` and exports `LSF_ENVDIR` to it. NF then logs `LSB_JOB_MEMLIMIT=N (false)` and `shouldDivide=true`... but in NF 25.10.4 this only fixes `-M`, not `rusage`.
+
+2. **`clusterOptions` closure** (`conf/lsf.config`): Appends a correctly-divided `-R "rusage[mem=X]"` after the auto-generated one. IBM LSF uses the **last-specified rusage** when multiple `-R` strings are present. For UNICYCLER (16 CPUs, 40 GB): auto `rusage[mem=40960]` → overridden by `rusage[mem=2560]` → 16 × 2560 MB = 40 GB total. Verified: LSF Combined shows `rusage[mem=2560.00]` and jobs schedule immediately.
+
+**Never set `perJobMemLimit = true`** — this would disable even the `-M` division.
 
 #### Distributed (`submit_bacass_distributed.sh`)
 
@@ -96,7 +100,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | LSF executor config | `conf/lsf.config` |
 | Queue | `hpc` |
 | Max concurrent jobs | 20 (keeps ~320 cores peak) |
-| `perJobMemLimit` | `false` in `conf/lsf.config` — but DTU HPC has `LSB_JOB_MEMLIMIT=Y` in system lsf.conf, which NF 25.x auto-detects and uses to override `perJobMemLimit` via OR logic. Fix: `setup.sh` generates a shadow lsf.conf with `LSB_JOB_MEMLIMIT=N` and exports `LSF_ENVDIR` to it. |
+| `perJobMemLimit` | `false` in `conf/lsf.config` — only divides `-M`, not `rusage` in NF 25.10.4. Rusage fix is the `clusterOptions` closure (see above). Shadow lsf.conf also applied for `-M` correctness. |
 | Submit rate limit | 25 jobs/min |
 | Poll interval | 30 sec |
 | `-resume` | enabled |
@@ -395,5 +399,5 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
 - **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
-- **Unicycler jobs stuck PEND — "Resource (mem) limit defined on queue has been reached"**: root cause is DTU HPC's `/lsf/conf/lsf.conf` having `LSB_JOB_MEMLIMIT=Y`. Nextflow 25.x auto-detects this and sets `lsbJobMemLimit=true` internally, overriding `perJobMemLimit=false` via OR logic — so `rusage[mem=X]` is not divided by CPUs. A 16-CPU/40 GB job gets `rusage[mem=40960]` per slot = 640 GB total reservation; only one can run at a time. Tell-tale sign: `-M 2560` (divided) but `rusage[mem=40960]` (not divided). Fix: `setup.sh` generates a shadow `conf/lsf_shadow/lsf.conf` with `LSB_JOB_MEMLIMIT=N` and exports `LSF_ENVDIR` pointing to it — Nextflow then sees `N` and honours `perJobMemLimit=false`. Kill the head job and resubmit with `-resume`.
+- **Unicycler jobs stuck PEND — "Resource (mem) limit defined on queue has been reached"**: NF 25.10.4 does not divide `rusage[mem=X]` by CPUs — only `-M` is divided. A 16-CPU/40 GB job gets `rusage[mem=40960]` per slot = 640 GB total reservation; no 128 GB node can host this. Tell-tale sign: `-M 2560` (divided correctly) but `rusage[mem=40960]` (not divided). Two-part fix already applied: (1) `setup.sh` generates shadow `conf/lsf_shadow/lsf.conf` with `LSB_JOB_MEMLIMIT=N` (so NF's `shouldDivide` is true for `-M`); (2) `clusterOptions` closure in `conf/lsf.config` appends `-R "rusage[mem=memory/cpus]"` — LSF last-wins rule overrides the auto-generated undivided rusage. Verify fix: `bjobs -l <jobid> | grep Combined` should show `rusage[mem=2560.00]` for 16-CPU jobs. If broken again: kill head and resubmit with `-resume`.
 - **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode can burn fairshare and drop priority significantly. Resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM) to reduce fairshare consumption. If already stuck: kill everything and resubmit with `-resume` after priority recovers.
