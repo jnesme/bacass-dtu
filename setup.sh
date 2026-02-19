@@ -30,6 +30,19 @@ export BACASS_KRAKEN2DB="${BACASS_DIR}/assets/databases/minikraken2_v2_8GB_20190
 export BACASS_KMERFINDERDB="${BACASS_DIR}/assets/databases/kmerfinder_20190108_stable_dirs/bacteria"
 export BACASS_BAKTADB="${BACASS_DIR}/assets/databases/bakta_db"
 
+# --- LSF shadow config ---
+# Nextflow 25.x auto-detects LSB_JOB_MEMLIMIT=Y from the system lsf.conf and
+# internally overrides perJobMemLimit=false, causing rusage[mem=X] to not be
+# divided by CPUs (e.g. 16 CPUs × 40 GB = 640 GB reservation instead of 40 GB).
+# Fix: generate a shadow lsf.conf identical to the system one except
+# LSB_JOB_MEMLIMIT=N, then point LSF_ENVDIR at it so Nextflow sees N.
+# bsub/bjobs still work correctly because all other paths in the shadow
+# lsf.conf (LSF_CONFDIR, LSB_CONFDIR, etc.) still point to the real system dirs.
+mkdir -p "${BACASS_DIR}/conf/lsf_shadow"
+sed 's/LSB_JOB_MEMLIMIT=Y/LSB_JOB_MEMLIMIT=N/' /lsf/conf/lsf.conf \
+    > "${BACASS_DIR}/conf/lsf_shadow/lsf.conf"
+export LSF_ENVDIR="${BACASS_DIR}/conf/lsf_shadow"
+
 # --- Nextflow settings ---
 # Keep Nextflow home (pulled pipelines, plugins) inside the project
 export NXF_HOME="${BACASS_DIR}/.nextflow_home"

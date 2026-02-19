@@ -24,3 +24,4 @@ funcscan_*.err
 funcscan_head_*.out
 funcscan_head_*.err
 funcscan_samplesheet.csv
+conf/lsf_shadow/
