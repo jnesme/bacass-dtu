@@ -198,14 +198,16 @@ Funcscan uses the same distributed LSF executor pattern as bacass: a lightweight
 |---|---|---|
 | antiSMASH | `assets/databases/antismash_db/` | 9.4 GB |
 | DeepBGC | `assets/databases/deepbgc_db/` | 2.8 GB |
-| CARD/RGI | `assets/databases/card_database_processed/` | 65 MB |
+| CARD/RGI | `assets/databases/card_database_raw` (symlink → `card_database_processed/`) | 65 MB |
 | AMRFinderPlus | `assets/databases/amrfinderplus_db/` | 237 MB |
 | DeepARG | `assets/databases/deeparg_db/` | 4.8 GB |
 | DRAMP (AMPcombi2) | `assets/databases/amp_DRAMP_database/` | 11 MB |
 
-Note: `card_database_processed` name is required — funcscan detects it and skips the `RGI_CARDANNOTATION` step. All paths are hardcoded in `submit_funcscan.sh`.
+Note: `--arg_rgi_db` must point to `card_database_raw` (a symlink to `card_database_processed/`), NOT to `card_database_processed` directly. **funcscan v3.0.0 bug**: the skip check uses `rgi_db.contains("card_database_processed")` on a `Path` (Iterable<Path>), which never matches a String — so `RGI_CARDANNOTATION` always runs. Inside the module, `mkdir card_database_processed` collides with the staged input when the input dir IS named `card_database_processed`. The `card_database_raw` symlink avoids the collision. All paths are hardcoded in `submit_funcscan_distributed.sh`.
 
-**Config collision**: funcscan must be launched from a temp directory (not the bacass project root) because bacass's `nextflow.config` would otherwise be auto-loaded, causing samplesheet validation to use bacass's schema (expects `ID` column) instead of funcscan's (expects `sample` column). The `submit_funcscan.sh` script handles this automatically by creating a temp dir, launching from there, and cleaning up after.
+**Config collision**: funcscan must be launched from a temp directory (not the bacass project root) because bacass's `nextflow.config` would otherwise be auto-loaded, causing samplesheet validation to use bacass's schema (expects `ID` column) instead of funcscan's (expects `sample` column). The `submit_funcscan_distributed.sh` script handles this automatically by creating a temp dir, launching from there, and cleaning up after.
+
+**`.nextflow.log` location**: bacass writes its log to `${BACASS_DIR}/.nextflow.log` (via `cd "${BACASS_DIR}"` in the submit script). Funcscan writes its log to the temp launch dir, which is deleted after the job ends. For debugging funcscan failures, use the LSF job output file (`funcscan_head_<JOBID>.out`) instead — it captures all Nextflow console output.
 
 **Portability**: `NXF_HOME` is set project-local in `setup.sh`, so pulled pipelines (like funcscan) are cached in `.nextflow_home/assets/` rather than `~/.nextflow/`. Conda environments are shared via `NXF_CONDA_CACHEDIR`. Funcscan uses a separate work directory (`work_funcscan/`) to avoid collisions with bacass.
 
@@ -220,7 +222,7 @@ setup.sh                        # Environment setup (conda, nextflow, DB paths)
 submit_bacass.sh                # LSF single-node submit script
 submit_bacass_distributed.sh    # LSF distributed submit script
 bacass_to_funcscan.sh           # Generate funcscan samplesheet from bacass results
-submit_funcscan.sh              # LSF distributed submit script for nf-core/funcscan
+submit_funcscan_distributed.sh  # LSF distributed submit script for nf-core/funcscan
 conf/
   base.config                   # Resource labels, tuned for DTU HPC 20-core/128GB
   lsf.config                    # LSF executor config for distributed runs
@@ -250,7 +252,7 @@ docs/                           # usage.md, output.md, images/
 | `submit_bacass.sh` | Edit INPUT, OUTDIR, ASSEMBLY_TYPE for each run |
 | `submit_bacass_distributed.sh` | Same, for distributed runs |
 | `bacass_to_funcscan.sh` | Generate funcscan samplesheet from bacass results |
-| `submit_funcscan.sh` | Submit nf-core/funcscan BGC screening job |
+| `submit_funcscan_distributed.sh` | Submit nf-core/funcscan BGC screening job (edit INPUT, OUTDIR, FUNCSCAN_WORK) |
 | `conf/modules.config` | Configure process args (`ext.args`), publishDir, scratch, `ext.when`, Bakta conda override |
 | `conf/bakta_environment.yml` | Bakta conda env spec with pyhmmer<0.12 pin |
 | `conf/gecco_environment.yml` | GECCO conda env spec with pyhmmer<0.12 pin |
@@ -399,17 +401,34 @@ Edit `conf/base.config` — adjust `params.max_cpus`, `params.max_memory`, `para
 ### Run BGC screening after bacass
 
 ```bash
-# 1. Generate funcscan samplesheet from bacass results
-#    Auto-detects Bakta/Prokka and Unicycler/Dragonflye output
-./bacass_to_funcscan.sh /path/to/bacass/results
+# 1. Generate the full samplesheet from bacass results
+./bacass_to_funcscan.sh /path/to/Bacass_results funcscan_samplesheet_full.csv
+# → writes funcscan_samplesheet_full.csv (all completed samples)
 
-# 2. Edit submit_funcscan.sh — set INPUT (path to generated CSV) and OUTDIR
+# 2. (Recommended) Create a 5-sample test subset first
+head -6 funcscan_samplesheet_full.csv > funcscan_samplesheet_test.csv
 
-# 3. Submit — runs distributed across the cluster, same as bacass
-bsub < submit_funcscan.sh
+# 3. Edit submit_funcscan_distributed.sh — three variables in the EDIT section:
+#    INPUT     → path to test or full samplesheet
+#    OUTDIR    → results directory (same for test and full run)
+#    FUNCSCAN_WORK → project-specific work dir (same for test and full run — required for -resume)
+
+# 4. Submit the test run
+bsub < submit_funcscan_distributed.sh
+
+# 5. Once the test passes, switch to full samplesheet and resume
+#    Only change INPUT in submit_funcscan_distributed.sh:
+#    INPUT=".../funcscan_samplesheet_full.csv"
+bsub < submit_funcscan_distributed.sh   # -resume reuses the 5 already-completed samples
+
+# Monitor
+tail -f funcscan_head_*.out   # Nextflow console output (note: .nextflow.log goes to temp dir and is deleted)
+bjobs -u $USER -w
 ```
 
 The bridging script scans the results directory, pairs each sample's assembly FASTA with its annotation files (`.faa` + `.gbff`/`.gbk`), and writes a 4-column CSV. Samples with missing files are skipped with a warning. Funcscan skips re-annotation when pre-annotated files are provided.
+
+**Critical**: `FUNCSCAN_WORK` must point to the same directory for both the test run and the full run — this is how `-resume` reuses cached work from the 5 test samples. Keep `OUTDIR` the same too.
 
 ### Troubleshooting
 
@@ -417,9 +436,10 @@ The bridging script scans the results directory, pairs each sample's assembly FA
 - **"Run conda init first"**: `conda.sh` must be sourced before `conda activate` — already handled in `setup.sh`
 - **Lock file error after killed job**: delete `.nextflow/cache/*/db/LOCK` and re-run with `-resume`
 - **SPAdes/Unicycler slow**: `scratch = true` is already set in modules.config; also consider `--unicycler_args "--mode bold"` for faster assembly
-- **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta, GECCO, DeepBGC): pyhmmer >=0.12 broke all three tools. Fixed via custom environment YAMLs that pin `pyhmmer<0.12`: `conf/bakta_environment.yml` (applied through `conf/modules.config`), `conf/gecco_environment.yml` and `conf/deepbgc_environment.yml` (applied through `conf/funcscan_overrides.config` passed with `-c` in `submit_funcscan.sh`)
-- **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
+- **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta, GECCO, DeepBGC): pyhmmer >=0.12 broke all three tools. Fixed via custom environment YAMLs that pin `pyhmmer<0.12`: `conf/bakta_environment.yml` (applied through `conf/modules.config`), `conf/gecco_environment.yml` and `conf/deepbgc_environment.yml` (applied through `conf/funcscan_overrides.config` passed with `-c` in `submit_funcscan_distributed.sh`)
+- **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan_distributed.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
+- **Funcscan `RGI_CARDANNOTATION` — "mkdir: cannot create directory 'card_database_processed': File exists"**: funcscan v3.0.0 bug — `rgi_db.contains("card_database_processed")` on a `Path` always returns false (Path.contains() checks Iterable elements, never matches a String), so `RGI_CARDANNOTATION` always runs. When `--arg_rgi_db` points to a dir named `card_database_processed`, the staged input collides with the module's `mkdir card_database_processed`. Fix: pass `assets/databases/card_database_raw` (a symlink to `card_database_processed/`) — already configured in `submit_funcscan_distributed.sh`.
 - **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
 - **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
-- **Unicycler jobs stuck PEND — "Resource (mem) limit defined on queue has been reached"**: NF 25.10.4 does not divide `rusage[mem=X]` by CPUs — only `-M` is divided. A 16-CPU/40 GB job gets `rusage[mem=40960]` per slot = 640 GB total reservation; no 128 GB node can host this. Tell-tale sign: `-M 2560` (divided correctly) but `rusage[mem=40960]` (not divided). Two-part fix already applied: (1) `setup.sh` generates shadow `conf/lsf_shadow/lsf.conf` with `LSB_JOB_MEMLIMIT=N` (so NF's `shouldDivide` is true for `-M`); (2) `clusterOptions` closure in `conf/lsf.config` appends `-R "rusage[mem=memory/cpus]"` — LSF last-wins rule overrides the auto-generated undivided rusage. Verify fix: `bjobs -l <jobid> | grep Combined` should show `rusage[mem=2560.00]` for 16-CPU jobs. If broken again: kill head and resubmit with `-resume`.
+- **Jobs stuck PEND — "Resource (mem) limit defined on queue has been reached"**: NF 25.10.4 does not divide `rusage[mem=X]` by CPUs — a 16-CPU/40 GB job gets `rusage[mem=40960]` per slot = 640 GB total; no 128 GB node can host this. Two-part fix already applied: (1) **shadow lsf.conf** in `setup.sh` — forces NF to see `LSB_JOB_MEMLIMIT=N` so it divides `-M` by CPUs; (2) **`perTaskReserve = true`** in `conf/lsf.config` — NF divides `rusage[mem=X]` by CPUs and generates one clean `-R "select[mem>=<total>] rusage[mem=<per-slot>]"`. Verify: `bjobs -l <jobid>` should show a single `-R` string with `rusage[mem=<task.memory/cpus>]`. If broken again: kill head and resubmit with `-resume`.
 - **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode can burn fairshare and drop priority significantly. Resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM) to reduce fairshare consumption. If already stuck: kill everything and resubmit with `-resume` after priority recovers.

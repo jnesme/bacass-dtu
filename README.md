@@ -64,7 +64,7 @@ BACASS_DIR="/work3/josne/github/bacass"
 cp "${BACASS_DIR}/submit_bacass.sh" "${PROJECT_DIR}/"
 cp "${BACASS_DIR}/submit_bacass_distributed.sh" "${PROJECT_DIR}/"
 cp "${BACASS_DIR}/bacass_to_funcscan.sh" "${PROJECT_DIR}/"
-cp "${BACASS_DIR}/submit_funcscan.sh" "${PROJECT_DIR}/"
+cp "${BACASS_DIR}/submit_funcscan_distributed.sh" "${PROJECT_DIR}/"
 ```
 
 ### Step 2: Prepare a samplesheet
@@ -151,27 +151,61 @@ Since bacass annotates with Bakta (producing `.gbff` and `.faa` files), funcscan
 - **AMP screening**: ampir, amplify, macrel, hmmsearch (antimicrobial peptides)
 - **ARG screening**: ABRicate, AMRFinderPlus, DeepARG, fARGene, RGI (antimicrobial resistance genes)
 
-The bridging script auto-detects the annotation tool (Bakta `.gbff` or Prokka `.gbk`) and assembler output (Unicycler or Dragonflye), then generates a 4-column CSV (`sample,fasta,protein,gbk`) ready for funcscan. Samples with missing files are skipped with a warning.
+The bridging script auto-detects the annotation tool (Bakta `.gbff` or Prokka `.gbk`) and assembler output (Unicycler or Dragonflye), then generates a 4-column CSV (`sample,fasta,protein,gbk`) ready for funcscan.
+
+**Step 7a — Generate samplesheets**
 
 ```bash
 cd /path/to/your/project
 
-# Generate funcscan samplesheet from bacass results
-./bacass_to_funcscan.sh /path/to/your/Bacass_results
-# → writes funcscan_samplesheet.csv with all completed samples
+# Generate the full samplesheet from all completed bacass samples
+./bacass_to_funcscan.sh /path/to/your/Bacass_results funcscan_samplesheet_full.csv
 
-# Edit submit_funcscan.sh — set INPUT and OUTDIR
-vi submit_funcscan.sh
+# Create a 5-sample test subset (recommended before running all samples)
+head -6 funcscan_samplesheet_full.csv > funcscan_samplesheet_test.csv
+```
 
-# Submit — runs distributed across the cluster (same as bacass)
-bsub < submit_funcscan.sh
+**Step 7b — Configure the submit script**
 
-# Monitor
-tail -f funcscan_head_*.out
+Open `submit_funcscan_distributed.sh` and edit the three variables in the `EDIT THESE` section:
+
+```bash
+INPUT="/path/to/funcscan_samplesheet_test.csv"   # start with test; swap to _full later
+OUTDIR="/path/to/funcscan_results"               # same for test and full run
+FUNCSCAN_WORK="/path/to/your/project/work_funcscan"  # same for test and full run
+```
+
+> **Important**: `FUNCSCAN_WORK` and `OUTDIR` must stay the same between the test run and the full run. Nextflow uses `FUNCSCAN_WORK` to cache completed tasks — keeping it consistent is what makes `-resume` skip the already-processed test samples when you scale up.
+
+You can also toggle which screening modules to run:
+
+```bash
+RUN_BGC="true"   # BGC: antiSMASH, DeepBGC, GECCO
+RUN_AMP="true"   # AMP: ampir, amplify, macrel, AMPcombi2
+RUN_ARG="true"   # ARG: ABRicate, AMRFinderPlus, DeepARG, fARGene, RGI
+```
+
+**Step 7c — Submit the test run**
+
+```bash
+bsub < submit_funcscan_distributed.sh
+```
+
+Monitor progress with the LSF output file — funcscan's `.nextflow.log` goes to a temporary directory and is deleted after the job ends:
+
+```bash
+tail -f funcscan_head_*.out   # all Nextflow console output is here
 bjobs -u $USER -w
 ```
 
-Funcscan runs distributed just like bacass — a lightweight head process (1 core / 4 GB) dispatches each screening task as a separate LSF job. This is essential for 100+ genomes because funcscan runs ~15 tools per sample. The head job uses 72h wall time to outlive all sub-jobs. `-resume` is enabled so you can safely resubmit after interruption.
+**Step 7d — Scale up to all samples**
+
+Once the test run completes successfully, update `INPUT` in `submit_funcscan_distributed.sh` to the full samplesheet (keep `OUTDIR` and `FUNCSCAN_WORK` unchanged), then resubmit:
+
+```bash
+# In submit_funcscan_distributed.sh: INPUT=".../funcscan_samplesheet_full.csv"
+bsub < submit_funcscan_distributed.sh   # -resume skips the 5 already-completed samples
+```
 
 ### Submit script details
 
@@ -200,7 +234,7 @@ Each pipeline task is submitted as a separate LSF job. Tuned for 100+ genome run
 | `-resume` | enabled |
 | Output | `bacass_head_<JOBID>.out` / `.err` |
 
-#### Funcscan (`submit_funcscan.sh`)
+#### Funcscan (`submit_funcscan_distributed.sh`)
 
 Funcscan uses the same distributed pattern as bacass — a lightweight head process dispatches each screening task (antiSMASH, DeepBGC, ABRicate, etc.) as a separate LSF job. This is critical for 100+ genomes because funcscan runs ~15 tools per sample; on a single node they would serialize and take days.
 
@@ -213,7 +247,9 @@ Funcscan uses the same distributed pattern as bacass — a lightweight head proc
 | `-resume` | enabled |
 | Output | `funcscan_head_<JOBID>.out` / `.err` |
 
-Funcscan reuses the same `conf/lsf.config` as bacass for LSF executor settings (queue, concurrency, submit rate). It additionally loads `conf/funcscan_overrides.config` which pins `pyhmmer<0.12` for GECCO and DeepBGC via custom conda environment YAMLs.
+Funcscan reuses the same `conf/lsf.config` as bacass for LSF executor settings (queue, concurrency, poll interval). It additionally loads `conf/funcscan_overrides.config` which pins `pyhmmer<0.12` for GECCO and DeepBGC via custom conda environment YAMLs, and caps resource allocations to fit DTU HPC's 128 GB nodes.
+
+> **Note**: funcscan's `.nextflow.log` is written to a temporary directory and deleted after the job ends. Use `funcscan_head_<JOBID>.out` for all debugging.
 
 ### How the submit scripts work
 
@@ -244,7 +280,12 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 | Process | CPUs | Memory | Reason |
 |---|---|---|---|
 | unicycler | 8 | 8 GB (→ 16 GB retry) | Observed peak 3.8 GB / ~6% CPU efficiency on 16 CPUs |
-| kraken2 | 8 | 40 GB | I/O-bound on DB load, doesn't scale past ~8 threads |
+| fastqc | 2 | 4 GB (→ 8 GB retry) | Single-threaded; process_medium (40 GB) massively over-provisioned |
+| fastp | 4 | 8 GB (→ 16 GB retry) | Low memory tool; 4 CPUs covers worker + I/O threads |
+| kraken2 | 8 | 16 GB (→ 32 GB retry) | minikraken2 DB is ~8 GB; 16 GB gives 2× headroom |
+| quast | 2 | 4 GB (→ 8 GB retry) | Mostly single-threaded for bacterial genomes |
+| busco | 4 | 8 GB (→ 16 GB retry) | HMMER-based; memory-light, doesn't scale past ~4 CPUs |
+| bakta | 8 | 16 GB (→ 32 GB retry) | Full DB diamond alignment ~8 GB |
 | racon | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
 | medaka | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
 | liftoff | 8 | 40 GB | Annotation of small bacterial genomes, fast at 8 cores |
@@ -269,18 +310,26 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 
 ```bash
 # Full workflow from scratch
-cp submit_bacass_distributed.sh bacass_to_funcscan.sh submit_funcscan.sh /your/project/
+cp submit_bacass_distributed.sh bacass_to_funcscan.sh submit_funcscan_distributed.sh /your/project/
 vi submit_bacass_distributed.sh        # set INPUT, OUTDIR, ASSEMBLY_TYPE
 bsub < submit_bacass_distributed.sh    # submit assembly + annotation
 # ... wait for completion ...
-./bacass_to_funcscan.sh /your/results  # generate funcscan samplesheet
-vi submit_funcscan.sh                  # set INPUT, OUTDIR
-bsub < submit_funcscan.sh             # submit BGC/AMP/ARG screening (distributed)
+
+# Generate funcscan samplesheets
+./bacass_to_funcscan.sh /your/Bacass_results funcscan_samplesheet_full.csv
+head -6 funcscan_samplesheet_full.csv > funcscan_samplesheet_test.csv  # 5-sample test
+
+# Edit submit_funcscan_distributed.sh — set INPUT (test first), OUTDIR, FUNCSCAN_WORK
+vi submit_funcscan_distributed.sh
+bsub < submit_funcscan_distributed.sh  # test run (5 samples)
+# ... verify results ...
+# swap INPUT to funcscan_samplesheet_full.csv, keep OUTDIR + FUNCSCAN_WORK the same
+bsub < submit_funcscan_distributed.sh  # full run — resumes, skips the 5 completed samples
 
 # Monitor
 bjobs -w
 tail -f bacass_head_*.out              # bacass progress
-tail -f funcscan_head_*.out            # funcscan progress
+tail -f funcscan_head_*.out            # funcscan progress (use this, not .nextflow.log — it goes to temp dir)
 
 # Resume after interruption
 bsub < submit_bacass_distributed.sh    # just resubmit — skips completed steps
