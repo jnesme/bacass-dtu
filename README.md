@@ -243,6 +243,7 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 
 | Process | CPUs | Memory | Reason |
 |---|---|---|---|
+| unicycler | 8 | 8 GB (→ 16 GB retry) | Observed peak 3.8 GB / ~6% CPU efficiency on 16 CPUs |
 | kraken2 | 8 | 40 GB | I/O-bound on DB load, doesn't scale past ~8 threads |
 | racon | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
 | medaka | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
