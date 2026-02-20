@@ -52,7 +52,13 @@ Tuned for DTU HPC's smallest nodes: **20 cores / 128 GB RAM** (47 Huawei XH620 V
 
 | Process | CPUs | Memory | Time | Reason |
 |---|---|---|---|---|
-| `KRAKEN2` | 8 | 40 GB | 8h | I/O-bound on DB load, doesn't scale past ~8 threads |
+| `UNICYCLER` | 8 | 8 GB → 16 GB retry | 16h → 32h retry | Observed peak 3.8 GB / ~6% CPU eff. on 16 CPUs; SPAdes single-threaded between phases |
+| `BAKTA` | 8 | 16 GB → 32 GB retry | — | Observed peak 4.5 GB at 7 min / 32–50% CPU eff.; full DB diamond alignment ~8 GB |
+| `KRAKEN2` | 8 | 16 GB → 32 GB retry | 8h | minikraken2 DB is ~8 GB; 16 GB gives 2× headroom |
+| `FASTQC_RAW/TRIM` | 2 | 4 GB → 8 GB retry | — | Single-threaded tool; process_medium (40 GB) was massively over-provisioned |
+| `FASTP` | 4 | 8 GB → 16 GB retry | — | Low memory tool; 4 CPUs covers worker + I/O threads |
+| `BUSCO_BUSCO` | 4 | 8 GB → 16 GB retry | — | Bacterial BUSCO (HMMER-based) is memory-light; doesn't scale past ~4 CPUs |
+| `QUAST` | 2 | 4 GB → 8 GB retry | — | Mostly single-threaded for bacterial genomes |
 | `RACON` | 8 | 40 GB | 8h | Moderate parallelism, 8 CPUs sufficient for bacterial genomes |
 | `MEDAKA` | 8 | 40 GB | 8h | 8 CPUs sufficient for bacterial genomes |
 | `LIFTOFF` | 8 | 40 GB | 8h | Annotation of small bacterial genomes, fast at 8 cores |
@@ -79,15 +85,21 @@ All processes run on one node. Nextflow uses the local executor.
 
 #### Critical: LSF memory reservation in NF 25.10.4
 
-**NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs** — only `-M` (the kill limit) is divided. This means a 16-CPU / 40 GB job auto-generates `rusage[mem=40960]` per slot, so LSF tries to reserve 40960 MB × 16 = 640 GB on one node. No 128 GB node can satisfy this, causing jobs to PEND with "Resource (mem) limit defined on queue has been reached."
+**NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs** — only `-M` (the kill limit) is divided. This is empirically observed behaviour (confirmed via `bjobs -l`), not an officially acknowledged upstream bug. This means a 16-CPU / 40 GB job auto-generates `rusage[mem=40960]` per slot, so LSF tries to reserve 40960 MB × 16 = 640 GB on one node. No 128 GB node can satisfy this, causing jobs to PEND with "Resource (mem) limit defined on queue has been reached."
 
-**Two complementary fixes are applied:**
+**DTU HPC memory interpretation (confirmed by HPC support, A. Bordoni):** DTU HPC's LSF is configured in **per-core** mode — `-M` is interpreted per slot, not per job. `perJobMemLimit = true` would mean "memory is for the whole job" and should NOT be used here. Keep `perJobMemLimit = false` so NF divides `-M` by CPUs.
 
-1. **Shadow lsf.conf** (`setup.sh`): DTU HPC's `/lsf/conf/lsf.conf` has `LSB_JOB_MEMLIMIT=Y`. NF 25.x auto-detects this and, via `shouldDivide = !(perJobMemLimit || lsbJobMemLimit)`, keeps `shouldDivide=false` even when `perJobMemLimit=false` is set. `setup.sh` generates a shadow copy with `LSB_JOB_MEMLIMIT=N` and exports `LSF_ENVDIR` to it. NF then logs `LSB_JOB_MEMLIMIT=N (false)` and `shouldDivide=true`... but in NF 25.10.4 this only fixes `-M`, not `rusage`.
+**Two fixes are applied:**
 
-2. **`clusterOptions` closure** (`conf/lsf.config`): Appends a correctly-divided `-R "rusage[mem=X]"` after the auto-generated one. IBM LSF uses the **last-specified rusage** when multiple `-R` strings are present. For UNICYCLER (16 CPUs, 40 GB): auto `rusage[mem=40960]` → overridden by `rusage[mem=2560]` → 16 × 2560 MB = 40 GB total. Verified: LSF Combined shows `rusage[mem=2560.00]` and jobs schedule immediately.
+1. **Shadow lsf.conf** (`setup.sh`): DTU HPC's `/lsf/conf/lsf.conf` has `LSB_JOB_MEMLIMIT=Y`. NF auto-detects this and sets `perJobMemLimit=true`, disabling `-M` division. `setup.sh` shadows the file with `LSB_JOB_MEMLIMIT=N` and exports `LSF_ENVDIR` to it, so NF sees `perJobMemLimit=false` and divides `-M` by CPUs correctly.
 
-**Never set `perJobMemLimit = true`** — this would disable even the `-M` division.
+2. **`perTaskReserve = true`** (`conf/lsf.config`): Controls rusage division. NF auto-detects this from `RESOURCE_RESERVE_PER_TASK` in `lsf.conf` — DTU HPC does not set it, so we set `perTaskReserve = true` explicitly in the executor config. NF then generates a single clean `-R "select[mem>=<total>] rusage[mem=<per-slot>]"` string with rusage correctly divided by CPUs. Source: [NF issue #1071](https://github.com/nextflow-io/nextflow/issues/1071), merged 2019.
+
+**Result:** For an 8-CPU / 8 GB UNICYCLER job: `-M 1024` (8192/8), `-R "select[mem>=8192] rusage[mem=1024]"` — no conflicting entries, 8 GB total reservation.
+
+**Never set `perJobMemLimit = true`** — this would disable `-M` division.
+
+**Scheduler polling:** HPC support (A. Bordoni) advised that each `pollInterval` tick translates to a real `bjobs` call that loads the LSF daemon. Keep `pollInterval = '5 min'`. Do not add `submitRateLimit` or `queueStatInterval` — LSF enforces its own submission limits.
 
 #### Distributed (`submit_bacass_distributed.sh`)
 
@@ -101,8 +113,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | Queue | `hpc` |
 | Max concurrent jobs | 20 (keeps ~320 cores peak) |
 | `perJobMemLimit` | `false` in `conf/lsf.config` — only divides `-M`, not `rusage` in NF 25.10.4. Rusage fix is the `clusterOptions` closure (see above). Shadow lsf.conf also applied for `-M` correctness. |
-| Submit rate limit | 25 jobs/min |
-| Poll interval | 30 sec |
+| Poll interval | 5 min (HPC support: shorter intervals hammer the LSF daemon with bjobs calls) |
 | `-resume` | enabled |
 | `--unicycler_args` | `""` (not set by default) |
 
@@ -181,7 +192,18 @@ Funcscan uses the same distributed LSF executor pattern as bacass: a lightweight
 
 **Two `-c` config files**: The nextflow command passes both `-c conf/lsf.config` (LSF executor settings) and `-c conf/funcscan_overrides.config` (conda environment overrides for GECCO/DeepBGC). Nextflow merges multiple `-c` configs in order, so both take effect.
 
-**Databases**: antiSMASH database stored in `assets/databases/antismash_db/`. AMP and ARG tools generally bundle their own databases or download automatically.
+**Databases**: all pre-downloaded to `assets/databases/` (gitignored):
+
+| Tool | Path | Size |
+|---|---|---|
+| antiSMASH | `assets/databases/antismash_db/` | 9.4 GB |
+| DeepBGC | `assets/databases/deepbgc_db/` | 2.8 GB |
+| CARD/RGI | `assets/databases/card_database_processed/` | 65 MB |
+| AMRFinderPlus | `assets/databases/amrfinderplus_db/` | 237 MB |
+| DeepARG | `assets/databases/deeparg_db/` | 4.8 GB |
+| DRAMP (AMPcombi2) | `assets/databases/amp_DRAMP_database/` | 11 MB |
+
+Note: `card_database_processed` name is required — funcscan detects it and skips the `RGI_CARDANNOTATION` step. All paths are hardcoded in `submit_funcscan.sh`.
 
 **Config collision**: funcscan must be launched from a temp directory (not the bacass project root) because bacass's `nextflow.config` would otherwise be auto-loaded, causing samplesheet validation to use bacass's schema (expects `ID` column) instead of funcscan's (expects `sample` column). The `submit_funcscan.sh` script handles this automatically by creating a temp dir, launching from there, and cleaning up after.
 
@@ -214,7 +236,7 @@ subworkflows/
 bin/                            # Python helper scripts
 tests/                          # nf-test files (*.nf.test) and snapshots (*.nf.test.snap)
 assets/
-  databases/                    # Databases: Kraken2, Kmerfinder, Bakta, antiSMASH (gitignored)
+  databases/                    # Databases: Kraken2, Kmerfinder, Bakta, antiSMASH, DeepBGC, CARD, AMRFinderPlus, DeepARG, DRAMP (gitignored)
   multiqc_config*.yml           # MultiQC configs per assembly type
 .conda_envs/                    # Pre-built conda environments (gitignored)
 .nextflow_home/                 # Nextflow home: pulled pipelines, plugins (gitignored)
