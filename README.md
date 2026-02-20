@@ -198,6 +198,14 @@ tail -f funcscan_head_*.out   # all Nextflow console output is here
 bjobs -u $USER -w
 ```
 
+A successful run ends with:
+
+```
+-[nf-core/funcscan] Pipeline completed successfully, but with errored process(es) -
+```
+
+The "errored process(es)" are always `GECCO_RUN` and `DEEPBGC_PIPELINE`, shown as `NOTE: ... terminated with an error exit status (1) -- Error is ignored`. This is **expected and harmless** — both tools run successfully and produce all their output files, but their post-run `mv` step fails because the sample name already matches the output prefix (a rename-to-self). The BGC results are complete. See CLAUDE.md troubleshooting for details.
+
 **Step 7d — Scale up to all samples**
 
 Once the test run completes successfully, update `INPUT` in `submit_funcscan_distributed.sh` to the full samplesheet (keep `OUTDIR` and `FUNCSCAN_WORK` unchanged), then resubmit:
