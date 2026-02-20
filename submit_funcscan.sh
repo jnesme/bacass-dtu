@@ -23,8 +23,12 @@
 #==========================================================================
 # EDIT THESE BEFORE SUBMITTING
 #==========================================================================
-INPUT="funcscan_samplesheet.csv"           # <-- from bacass_to_funcscan.sh
-OUTDIR="/path/to/results_funcscan"
+INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_test.csv"
+OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_results"
+
+# Work directory — keep consistent between test and full run so -resume works.
+# Use a project-specific path so multiple projects don't share the same cache.
+FUNCSCAN_WORK="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/work_funcscan"
 
 # Screening modules — set to "true" or "false"
 RUN_BGC="true"   # BGC: antiSMASH, DeepBGC, GECCO
@@ -56,15 +60,12 @@ AMRFINDER_DB="${BACASS_DIR}/assets/databases/amrfinderplus_db"
 DEEPARG_DB="${BACASS_DIR}/assets/databases/deeparg_db"
 AMPCOMBI_DB="${BACASS_DIR}/assets/databases/amp_DRAMP_database"
 
-# Separate work directory so funcscan doesn't collide with bacass
-FUNCSCAN_WORK="${BACASS_DIR}/work_funcscan"
-
 # Resolve INPUT to absolute path (we cd to a temp dir before launching)
 INPUT="$(realpath "${INPUT}")"
 
 # Validate inputs
-if [ "${OUTDIR}" = "/path/to/results_funcscan" ]; then
-    echo "ERROR: Please edit OUTDIR in submit_funcscan.sh before submitting."
+if [ -z "${OUTDIR}" ]; then
+    echo "ERROR: Please set OUTDIR in submit_funcscan.sh before submitting."
     exit 1
 fi
 if [ ! -f "${INPUT}" ]; then
