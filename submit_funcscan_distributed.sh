@@ -55,7 +55,7 @@ export BACASS_DIR="/work3/josne/github/bacass"
 #==========================================================================
 ANTISMASH_DB="${BACASS_DIR}/assets/databases/antismash_db"
 DEEPBGC_DB="${BACASS_DIR}/assets/databases/deepbgc_db"
-CARD_DB="${BACASS_DIR}/assets/databases/card_database_processed"
+CARD_DB="${BACASS_DIR}/assets/databases/card_database_raw"
 AMRFINDER_DB="${BACASS_DIR}/assets/databases/amrfinderplus_db"
 DEEPARG_DB="${BACASS_DIR}/assets/databases/deeparg_db"
 AMPCOMBI_DB="${BACASS_DIR}/assets/databases/amp_DRAMP_database"
