@@ -50,11 +50,11 @@ export BACASS_DIR="/work3/josne/github/bacass"
 #   AMPcombi2:     DRAMP database                     (~100 MB)
 #==========================================================================
 ANTISMASH_DB="${BACASS_DIR}/assets/databases/antismash_db"
-DEEPBGC_DB=""        # empty = auto-download via deepbgc download
-CARD_DB=""           # empty = auto-download from card.mcmaster.ca (for RGI)
-AMRFINDER_DB=""      # empty = auto-update from NCBI
-DEEPARG_DB=""        # empty = auto-download via deeparg download_data
-AMPCOMBI_DB=""       # empty = auto-download DRAMP database
+DEEPBGC_DB="${BACASS_DIR}/assets/databases/deepbgc_db"
+CARD_DB="${BACASS_DIR}/assets/databases/card_database_processed"
+AMRFINDER_DB="${BACASS_DIR}/assets/databases/amrfinderplus_db"
+DEEPARG_DB="${BACASS_DIR}/assets/databases/deeparg_db"
+AMPCOMBI_DB="${BACASS_DIR}/assets/databases/amp_DRAMP_database"
 
 # Separate work directory so funcscan doesn't collide with bacass
 FUNCSCAN_WORK="${BACASS_DIR}/work_funcscan"
