@@ -23,7 +23,7 @@
 #==========================================================================
 # EDIT THESE BEFORE SUBMITTING
 #==========================================================================
-INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_test.csv"
+INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_full.csv"
 OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_results"
 
 # Work directory — keep consistent between test and full run so -resume works.
@@ -128,9 +128,10 @@ echo "=========================================="
 #
 # Pre-annotated input (Bakta .gbff + .faa) → funcscan skips annotation
 #
-# Launch from a temp directory to avoid bacass's nextflow.config
-# interfering with funcscan's samplesheet validation
-LAUNCH_DIR=$(mktemp -d)
+# Launch from OUTDIR's parent — no nextflow.config there, so no schema collision
+# with bacass. Using a fixed persistent directory so .nextflow/cache/ survives
+# between runs and -resume actually works.
+LAUNCH_DIR="$(dirname "${OUTDIR}")"
 cd "${LAUNCH_DIR}"
 
 # shellcheck disable=SC2086
@@ -149,7 +150,6 @@ nextflow run nf-core/funcscan \
 EXIT_CODE=$?
 
 cd "${BACASS_DIR}"
-rm -rf "${LAUNCH_DIR}"
 
 echo "=========================================="
 echo "Job finished on $(date)"
