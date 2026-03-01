@@ -1,13 +1,24 @@
-<h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/nf-core-bacass_logo_dark.png">
-    <img alt="nf-core/bacass" src="docs/images/nf-core-bacass_logo_light.png">
-  </picture>
-</h1>
+<table align="center">
+  <tr>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/nf-core-bacass_logo_dark.png">
+        <img alt="nf-core/bacass" src="docs/images/nf-core-bacass_logo_light.png">
+      </picture>
+    </td>
+    <td align="center" style="font-size:2em; padding: 0 16px;">➜</td>
+    <td align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/nf-core/funcscan/master/docs/images/nf-core-funcscan_logo_flat_dark.png">
+        <img alt="nf-core/funcscan" src="https://raw.githubusercontent.com/nf-core/funcscan/master/docs/images/nf-core-funcscan_logo_flat_light.png">
+      </picture>
+    </td>
+  </tr>
+</table>
 
-> **DTU Bioengineering fork** — This is a customized version of [nf-core/bacass](https://github.com/nf-core/bacass) (v2.5.0) tuned for the [DTU HPC cluster](https://www.hpc.dtu.dk/?page_id=2520) (LSF 10 scheduler). It includes pre-configured resource limits for DTU's compute nodes, distributed LSF job submission, self-contained conda environments, and a pipeline chain into [nf-core/funcscan](https://nf-co.re/funcscan/) for downstream BGC/AMP/ARG screening. See [Running on Your Own Samples](#running-on-your-own-samples-dtu-hpc) below.
+> **DTU Bioengineering fork** — A paired deployment of [nf-core/bacass](https://github.com/nf-core/bacass) (v2.5.0) and [nf-core/funcscan](https://nf-co.re/funcscan/) (v3.0.0) designed to run in sequence on the [DTU HPC cluster](https://www.hpc.dtu.dk/?page_id=2520) (LSF scheduler). Bacass assembles and annotates your bacterial genomes; funcscan screens the results for biosynthetic gene clusters (BGC), antimicrobial peptides (AMP), and resistance genes (ARG). Submit scripts, pre-built conda environments, and all databases are bundled — no manual setup required. See [Running on Your Own Samples](#running-on-your-own-samples-dtu-hpc) below.
 >
-> **Upstream**: [nf-core/bacass](https://github.com/nf-core/bacass) | **Institution**: [DTU Bioengineering](https://www.bioengineering.dtu.dk/) | **HPC**: [DTU HPC cluster specs](https://www.hpc.dtu.dk/?page_id=2520)
+> **Upstreams**: [nf-core/bacass](https://github.com/nf-core/bacass) · [nf-core/funcscan](https://github.com/nf-core/funcscan) | **Institution**: [DTU Bioengineering](https://www.bioengineering.dtu.dk/) | **HPC**: [DTU HPC cluster specs](https://www.hpc.dtu.dk/?page_id=2520)
 
 [![Nextflow](https://img.shields.io/badge/version-%E2%89%A524.10.5-green?style=flat&logo=nextflow&logoColor=white&color=%230DC09D&link=https%3A%2F%2Fnextflow.io)](https://www.nextflow.io/)
 [![nf-core template version](https://img.shields.io/badge/nf--core_template-3.3.2-green?style=flat&logo=nfcore&logoColor=white&color=%2324B064&link=https%3A%2F%2Fnf-co.re)](https://github.com/nf-core/tools/releases/tag/3.3.2)
