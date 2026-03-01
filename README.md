@@ -201,10 +201,10 @@ bjobs -u $USER -w
 A successful run ends with:
 
 ```
--[nf-core/funcscan] Pipeline completed successfully, but with errored process(es) -
+-[nf-core/funcscan] Pipeline completed successfully -
 ```
 
-The "errored process(es)" are always `GECCO_RUN` and `DEEPBGC_PIPELINE`, shown as `NOTE: ... terminated with an error exit status (1) -- Error is ignored`. This is **expected and harmless** — both tools run successfully and produce all their output files, but their post-run `mv` step fails because the sample name already matches the output prefix (a rename-to-self). The BGC results are complete. See CLAUDE.md troubleshooting for details.
+The `ext.prefix` overrides in `conf/funcscan_overrides.config` resolve the mv errors that previously caused `GECCO_RUN` and `DEEPBGC_PIPELINE` to exit with status 1: GECCO uses `${meta.id}_gecco` as prefix so the rename succeeds, and DeepBGC uses the static string `deepbgc` so the bash substitution targets the filename rather than renaming to self. See CLAUDE.md troubleshooting for details.
 
 **Step 7d — Scale up to all samples**
 
@@ -214,6 +214,47 @@ Once the test run completes successfully, update `INPUT` in `submit_funcscan_dis
 # In submit_funcscan_distributed.sh: INPUT=".../funcscan_samplesheet_full.csv"
 bsub < submit_funcscan_distributed.sh   # -resume skips the 5 already-completed samples
 ```
+
+#### Funcscan output files
+
+Each screening branch produces per-sample results that are aggregated into a single combined report. The `sample_id` column in every output file reflects the sample name from the samplesheet (`meta.id`), preserved end-to-end through each tool chain.
+
+**BGC branch** — antiSMASH + GECCO + DeepBGC → COMBGC
+
+| Step | Per-sample output | Notes |
+|------|-------------------|-------|
+| `ANTISMASH_ANTISMASH` | `bgc/antismash/<id>/` | GBK regions, HTML report, cluster plots |
+| `GECCO_RUN` | `bgc/gecco/<id>/<id>.clusters.tsv` | Gene cluster table; also `.genes.tsv`, `.features.tsv`, `_cluster_N.gbk` |
+| `DEEPBGC_PIPELINE` | `bgc/deepbgc/<id>/<id>.bgc.tsv` | BGC predictions; evaluation plots in `evaluation/` subdir |
+| `COMBGC` | `reports/combgc/<id>/combgc_summary.tsv` | Merged hits from all three tools; `sample_id = <id>` for every row |
+
+Final combined output: `reports/combgc/combgc_complete_summary.tsv` (all samples × all BGC tools)
+
+**AMP branch** — ampir + amplify + macrel + hmmsearch → AMPcombi2
+
+| Step | Per-sample output | Notes |
+|------|-------------------|-------|
+| `AMPIR`, `AMPLIFY`, `MACREL`, `HMMSEARCH_HMMSEARCH` | `amp/<tool>/<id>/` | Raw per-tool predictions |
+| `AMPCOMBI2_PARSETABLES` | `reports/ampcombi2/<id>/<id>_ampcombi.tsv` | Parsed and filtered hits; `sample_id = <id>` |
+
+Final combined output: `reports/ampcombi2/Ampcombi_summary.tsv` (all samples × all AMP tools)
+
+**ARG branch** — ABRicate + AMRFinderPlus + DeepARG + fARGene + RGI → hAMRonization
+
+| Step | Per-sample output | Notes |
+|------|-------------------|-------|
+| `ABRICATE_RUN`, `AMRFINDERPLUS_RUN`, `DEEPARG`, `FARGENE`, `RGI_MAIN` | `arg/<tool>/<id>/` | Raw per-tool predictions |
+| `HAMRONIZATION_<TOOL>` | `arg/hamronization/<tool>/<id>.tsv` | Standardised TSV; `sample_id = <id>` |
+
+Final combined output: `reports/hamronization_summarize/hamronization_combined_report.tsv` (all samples × all ARG tools)
+
+**Summary of final output files:**
+
+| File | Location | Content |
+|------|----------|---------|
+| `combgc_complete_summary.tsv` | `reports/combgc/` | All BGC hits, all samples, all tools |
+| `Ampcombi_summary.tsv` | `reports/ampcombi2/` | All AMP hits, all samples, all tools |
+| `hamronization_combined_report.tsv` | `reports/hamronization_summarize/` | All ARG hits, all samples, all tools |
 
 ### Submit script details
 
