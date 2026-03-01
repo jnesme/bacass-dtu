@@ -29,7 +29,7 @@ shortNlong    ./data/S1_R1.fastq.gz    ./data/S1_R2.fastq.gz    ./data/S1_long_f
 
 | Column       | Description                                                                                                                                                                 |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sample`     | Custom sample name. May not contain spaces. Must consist of alphanumeric characters, hyphens, and underscores only (e.g. `S0204`, `sample-1`). Dots and other regex metacharacters are not allowed: the funcscan integration uses `sample` as a literal string in regex replacements inside `saveAs` closures (GECCO publishDir fix), and a metacharacter in the name would cause incorrect filename matching. |
+| `sample`     | Custom sample name. May not contain spaces.                                                                                                                                 |
 | `R1`         | Full path to FastQ file for Illumina short reads 1. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz". `NA` indicates that the file is missing.         |
 | `R2`         | Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz". `NA` indicates that the file is missing.         |
 | `LongFastQ`  | Full path to FastQ file for ONT long reads. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz". `NA` indicates that the file is missing.                 |
