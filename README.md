@@ -91,7 +91,7 @@ sample3 NA                            NA                            /absolute/pa
 
 | Column | Description |
 |---|---|
-| `ID` | Unique sample name. Use only letters, digits, hyphens (`-`), and underscores (`_`). No spaces, dots, or other special characters. The funcscan integration uses this name as a literal string in regex replacements — a dot or other metacharacter would silently corrupt published filenames. |
+| `ID` | Unique sample name. Use only letters, digits, hyphens (`-`), and underscores (`_`). No spaces, dots, or other special characters. Two constraints from the funcscan integration: (1) the name is used as a literal string in regex replacements (GECCO publishDir) — a dot or other regex metacharacter would silently corrupt published filenames; (2) the name must not contain the substring `deepbgc` — the DeepBGC mv fix uses `"deepbgc"` as a static prefix and relies on it being absent from all sample IDs. |
 | `R1`, `R2` | Paired-end short reads (Illumina). Use `NA` for long-read-only samples |
 | `LongFastQ` | Nanopore long reads. Use `NA` for short-read-only samples |
 | `Fast5` | Nanopore Fast5 directory (only needed for nanopolish). Use `NA` otherwise |
