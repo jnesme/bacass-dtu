@@ -134,6 +134,13 @@ echo "=========================================="
 LAUNCH_DIR="$(dirname "${OUTDIR}")"
 cd "${LAUNCH_DIR}"
 
+# Apply local patches to funcscan assets before each run so they survive nextflow pull.
+# Patched files are tracked in conf/funcscan_patches/ and copied here at submit time.
+cp "${BACASS_DIR}/conf/funcscan_patches/comBGC.py" \
+   "${NXF_HOME}/assets/nf-core/funcscan/bin/comBGC.py"
+cp "${BACASS_DIR}/conf/funcscan_patches/combgc.nf" \
+   "${NXF_HOME}/assets/nf-core/funcscan/modules/local/combgc.nf"
+
 # shellcheck disable=SC2086
 nextflow run nf-core/funcscan \
     -r 3.0.0 \
