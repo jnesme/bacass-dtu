@@ -111,7 +111,7 @@ Nextflow runs as a lightweight head process and submits each pipeline task as a 
 | Per-task resources | From base.config labels (up to 24 CPU / 128 GB) |
 | LSF executor config | `conf/lsf.config` |
 | Queue | `hpc` |
-| Max concurrent jobs | 20 (keeps ~320 cores peak) |
+| Max concurrent jobs | 150 (~1200 cores peak at 8 CPUs avg) |
 | `perJobMemLimit` | `false` in `conf/lsf.config` — only divides `-M`, not `rusage` in NF 25.10.4. Rusage fix is the `clusterOptions` closure (see above). Shadow lsf.conf also applied for `-M` correctness. |
 | Poll interval | 5 min (HPC support: shorter intervals hammer the LSF daemon with bjobs calls) |
 | `-resume` | enabled |
@@ -185,7 +185,7 @@ Funcscan uses the same distributed LSF executor pattern as bacass: a lightweight
 |---|---|---|
 | Head process | 1 core, 4 GB, 72h | Lightweight — only dispatches sub-jobs |
 | Per-task resources | From funcscan's process labels | Each tool gets its own LSF job with appropriate resources |
-| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 20 concurrent jobs, 25/min submit rate |
+| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 150 concurrent jobs |
 | Conda env overrides | `conf/funcscan_overrides.config` | Pins `pyhmmer<0.12` for GECCO and DeepBGC via custom environment YAMLs |
 | Wall time | 72h | Head job must outlive all sub-jobs; 72h is max for `hpc` queue |
 | `-resume` | enabled | Safe to resubmit after interruption — skips completed tasks |

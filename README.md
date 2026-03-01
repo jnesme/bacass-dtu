@@ -277,7 +277,7 @@ Each pipeline task is submitted as a separate LSF job. Tuned for 100+ genome run
 |---|---|
 | Head process | 1 core, 4 GB |
 | Per-task jobs | Resources from base.config labels (up to 20 cores / 120 GB) |
-| Max concurrent jobs | 20 (~320 cores peak) |
+| Max concurrent jobs | 150 (~1200 cores peak at 8 CPUs avg) |
 | Wall time | 72h |
 | Unicycler mode | `--mode bold --no_correct` (2-3x faster) |
 | `-resume` | enabled |
@@ -291,12 +291,14 @@ Funcscan uses the same distributed pattern as bacass — a lightweight head proc
 |---|---|
 | Head process | 1 core, 4 GB |
 | Per-task jobs | Resources from funcscan's process labels (up to 20 cores / 120 GB) |
-| Max concurrent jobs | 20 (~320 cores peak, shared limit with bacass) |
+| Max concurrent jobs | 150 (~1200 cores peak at 8 CPUs avg) |
 | Wall time | 72h (head job must outlive all sub-jobs) |
 | `-resume` | enabled |
 | Output | `funcscan_head_<JOBID>.out` / `.err` |
 
 Funcscan reuses the same `conf/lsf.config` as bacass for LSF executor settings (queue, concurrency, poll interval). It additionally loads `conf/funcscan_overrides.config` which pins `pyhmmer<0.12` for GECCO and DeepBGC via custom conda environment YAMLs, and caps resource allocations to fit DTU HPC's 128 GB nodes.
+
+> **Fair usage**: `queueSize = 150` allows up to ~1200 cores running simultaneously. DTU HPC uses fairshare scheduling — sustained high-utilization runs deplete your priority and can cause subsequent jobs to PEND for hours or days. If jobs are stuck PEND for >24h, fairshare may be exhausted: kill the run, wait for priority to recover (typically overnight), then resubmit with `-resume` to pick up where you left off.
 
 > **Note**: funcscan's `.nextflow.log` is written to a temporary directory and deleted after the job ends. Use `funcscan_head_<JOBID>.out` for all debugging.
 
