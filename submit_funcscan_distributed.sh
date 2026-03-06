@@ -140,6 +140,8 @@ cp "${BACASS_DIR}/conf/funcscan_patches/comBGC.py" \
    "${NXF_HOME}/assets/nf-core/funcscan/bin/comBGC.py"
 cp "${BACASS_DIR}/conf/funcscan_patches/combgc.nf" \
    "${NXF_HOME}/assets/nf-core/funcscan/modules/local/combgc.nf"
+cp "${BACASS_DIR}/conf/funcscan_patches/deepbgc_pipeline_main.nf" \
+   "${NXF_HOME}/assets/nf-core/funcscan/modules/nf-core/deepbgc/pipeline/main.nf"
 
 # shellcheck disable=SC2086
 nextflow run nf-core/funcscan \

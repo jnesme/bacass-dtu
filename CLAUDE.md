@@ -2,313 +2,147 @@
 
 ## Project Overview
 
-**Bacass** (v2.5.0) is an nf-core bacterial assembly and annotation pipeline built with Nextflow DSL2. It supports short-read, long-read (Nanopore), and hybrid assemblies with multiple assembler and annotation tool choices.
+**Bacass** (v2.5.0) is an nf-core bacterial assembly and annotation pipeline (Nextflow DSL2). Short-read, long-read (Nanopore), and hybrid assemblies with multiple assembler/annotation options.
 
-- **Template**: nf-core 3.3.2
-- **Nextflow**: >=24.10.5, installed at `/work3/josne/miniconda3/envs/bacass/bin/nextflow` (v25.10.4)
+- **Nextflow**: v25.10.4 at `/work3/josne/miniconda3/envs/bacass/bin/nextflow`
 - **Conda**: 25.11.1 at `/work3/josne/miniconda3`
-- **License**: MIT
-- **HPC**: DTU HPC, LSF scheduler, queue `hpc`
+- **HPC**: DTU HPC, LSF scheduler, queue `hpc` (target: 20-core / 128 GB nodes)
+- **Profile**: `-profile conda`, all envs pre-built in `.conda_envs/`
 
-## Current Settings & Design Choices
+## Environment (`setup.sh`)
 
-### Portability approach
+- Must use `#!/bin/bash`; sources `conda.sh` then activates `bacass` env
+- Exports:
 
-We chose **Option C**: Nextflow manages conda environments per-process using `-profile conda`. All environments are pre-built and cached in `.conda_envs/` inside the project. No HPC modules or containers needed — everything is self-contained.
+| Variable | Value |
+|---|---|
+| `NXF_HOME` | `<project>/.nextflow_home/` |
+| `NXF_CONDA_CACHEDIR` | `<project>/.conda_envs/` |
+| `NXF_WORK` | `<project>/work/` |
+| `BACASS_KRAKEN2DB` | `assets/databases/minikraken2_v2_8GB_201904.tgz` |
+| `BACASS_KMERFINDERDB` | `assets/databases/kmerfinder_20190108_stable_dirs/bacteria` |
+| `BACASS_BAKTADB` | `assets/databases/bakta_db` |
 
-### Environment setup (`setup.sh`)
+## Resource Configuration (`conf/base.config`)
 
-- Sources `/work3/josne/miniconda3/etc/profile.d/conda.sh` to initialize the conda shell function
-- Activates `/work3/josne/miniconda3/envs/bacass` (provides Nextflow 25.10.4)
-- Must use `#!/bin/bash` (not `#!/bin/sh`) because `conda activate` is a bash function
-- Must always source `conda.sh` first — without it, `conda activate` fails with "Run conda init first" in non-interactive shells (bsub jobs)
+**Hard ceilings**: 20 CPUs / 120 GB / 48h. `check_max()` enforces limits on retry.
 
-### Exported variables
-
-| Variable | Value | Purpose |
+| Label | CPUs/Mem/Time | Retry |
 |---|---|---|
-| `NXF_HOME` | `<project>/.nextflow_home/` | Nextflow home (pulled pipelines, plugins) — project-local |
-| `NXF_CONDA_CACHEDIR` | `<project>/.conda_envs/` | Pre-built per-process conda environments |
-| `NXF_WORK` | `<project>/work/` | Nextflow work directory |
-| `BACASS_KRAKEN2DB` | `<project>/assets/databases/minikraken2_v2_8GB_201904.tgz` | Kraken2 database (compressed archive) |
-| `BACASS_KMERFINDERDB` | `<project>/assets/databases/kmerfinder_20190108_stable_dirs/bacteria` | Kmerfinder database (directory) |
-| `BACASS_BAKTADB` | `<project>/assets/databases/bakta_db` | Bakta annotation database (full, ~72 GB) |
+| `process_single` | 1 / 6 GB / 4h | 1 / 12 GB / 8h |
+| `process_low` | 4 / 16 GB / 4h | 8 / 32 GB / 8h |
+| `process_medium` | 8 / 40 GB / 8h | 16 / 80 GB / 16h |
+| `process_high` | 16 / 40 GB / 16h | 20 / 80 GB / 32h |
 
-### Resource configuration (`conf/base.config`)
+**Per-process overrides** (in `conf/modules.config`):
 
-Tuned for DTU HPC's smallest nodes: **20 cores / 128 GB RAM** (47 Huawei XH620 V3 2660v3 nodes). Memory capped at 120 GB to leave headroom for OS. A `check_max()` function enforces hard ceilings so nothing exceeds node limits, even on retry.
-
-**Hard ceilings**: 20 CPUs / 120 GB / 48h per process
-
-| Label | Attempt 1 | Attempt 2 (retry) | Processes |
+| Process | CPUs | Memory | Time |
 |---|---|---|---|
-| `process_single` | 1 CPU / 6 GB / 4h | 1 CPU / 12 GB / 8h | cat/fastq, gunzip, untar, multiqc, bakta/dbdownload |
-| `process_low` | 4 CPU / 16 GB / 4h | 8 CPU / 32 GB / 8h | prokka, nanoplot, toulligqc, filtlong, samtools/index, kraken2/db_preparation, kmerfinder/summary |
-| `process_medium` | 8 CPU / 40 GB / 8h | 16 CPU / 80 GB / 16h | fastqc, fastp, pycoqc, porechop, dragonflye, minimap2, samtools/sort, quast, busco, bakta, dfast, kmerfinder, custom/multiqc |
-| `process_high` | 16 CPU / 40 GB / 16h | 20 CPU / 80 GB / 32h | unicycler, canu, nanopolish |
-| `process_high_memory` | 120 GB | 120 GB (capped) | (unused currently) |
+| `UNICYCLER` | 8 | 8→16 GB | 16→32h |
+| `BAKTA` | 8 | 16→32 GB | — |
+| `KRAKEN2` | 8 | 16→32 GB | 8h |
+| `FASTQC_RAW/TRIM` | 2 | 4→8 GB | — |
+| `FASTP` | 4 | 8→16 GB | — |
+| `BUSCO_BUSCO` | 4 | 8→16 GB | — |
+| `QUAST` | 2 | 4→8 GB | — |
+| `RACON` | 8 | 40 GB | 8h |
+| `MEDAKA` | 8 | 40 GB | 8h |
+| `LIFTOFF` | 8 | 40 GB | 8h |
+| `MINIASM` | 1 | 16 GB | 8h |
 
-**Per-process resource overrides** (in `conf/modules.config` — these override the label defaults):
+**Error handling**: retries on exit codes 130-145, 104, 175. `maxRetries = 1`. Resources double on retry.
 
-| Process | CPUs | Memory | Time | Reason |
-|---|---|---|---|---|
-| `UNICYCLER` | 8 | 8 GB → 16 GB retry | 16h → 32h retry | Observed peak 3.8 GB / ~6% CPU eff. on 16 CPUs; SPAdes single-threaded between phases |
-| `BAKTA` | 8 | 16 GB → 32 GB retry | — | Observed peak 4.5 GB at 7 min / 32–50% CPU eff.; full DB diamond alignment ~8 GB |
-| `KRAKEN2` | 8 | 16 GB → 32 GB retry | 8h | minikraken2 DB is ~8 GB; 16 GB gives 2× headroom |
-| `FASTQC_RAW/TRIM` | 2 | 4 GB → 8 GB retry | — | Single-threaded tool; process_medium (40 GB) was massively over-provisioned |
-| `FASTP` | 4 | 8 GB → 16 GB retry | — | Low memory tool; 4 CPUs covers worker + I/O threads |
-| `BUSCO_BUSCO` | 4 | 8 GB → 16 GB retry | — | Bacterial BUSCO (HMMER-based) is memory-light; doesn't scale past ~4 CPUs |
-| `QUAST` | 2 | 4 GB → 8 GB retry | — | Mostly single-threaded for bacterial genomes |
-| `RACON` | 8 | 40 GB | 8h | Moderate parallelism, 8 CPUs sufficient for bacterial genomes |
-| `MEDAKA` | 8 | 40 GB | 8h | 8 CPUs sufficient for bacterial genomes |
-| `LIFTOFF` | 8 | 40 GB | 8h | Annotation of small bacterial genomes, fast at 8 cores |
-| `MINIASM` | 1 | 16 GB | 8h | Single-threaded — does not pass `task.cpus` to the command |
+## LSF Submission
 
-**Error handling**: retries on OOM/timeout exit codes (130-145, 104, 175). maxRetries = 1. Resources double on retry.
+### Single-node (`submit_bacass.sh`)
+Local executor. 20 cores, 120 GB (6 GB/core), 72h wall time, `hpc` queue.
 
-### LSF submission — two modes
+### Distributed (`submit_bacass_distributed.sh`)
+Head process: 1 core / 4 GB / 72h. Per-task via `conf/lsf.config`. Max 150 concurrent jobs. `pollInterval = '2 min'`.
 
-#### Single-node (`submit_bacass.sh`)
+### Critical: LSF Memory Fix (NF 25.10.4)
 
-All processes run on one node. Nextflow uses the local executor.
+NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs. Two fixes applied:
 
-| Setting | Value |
-|---|---|
-| Queue | `hpc` |
-| Cores | 20 |
-| Memory | 6 GB/core (120 GB total, under 128 GB node limit) |
-| Kill limit | 6.5 GB/core |
-| Wall time | 72h (max allowed on `hpc` queue) |
-| Email | josne@dtu.dk (start + completion) |
-| Output | `bacass_<JOBID>.out` / `.err` |
-| `-resume` | enabled (user added it) |
+1. **Shadow lsf.conf** (`setup.sh`): DTU HPC has `LSB_JOB_MEMLIMIT=Y` → NF disables `-M` division. Shadow with `LSB_JOB_MEMLIMIT=N`, export `LSF_ENVDIR` to shadow dir.
+2. **`perTaskReserve = true`** (`conf/lsf.config`): divides `rusage` by CPUs → single clean `-R "select[mem>=<total>] rusage[mem=<per-slot>]"`.
 
-#### Critical: LSF memory reservation in NF 25.10.4
+**Never set `perJobMemLimit = true`**. Verify: `bjobs -l <jobid>` → single `-R` string.
 
-**NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs** — only `-M` (the kill limit) is divided. This is empirically observed behaviour (confirmed via `bjobs -l`), not an officially acknowledged upstream bug. This means a 16-CPU / 40 GB job auto-generates `rusage[mem=40960]` per slot, so LSF tries to reserve 40960 MB × 16 = 640 GB on one node. No 128 GB node can satisfy this, causing jobs to PEND with "Resource (mem) limit defined on queue has been reached."
+## Annotation: Bakta
 
-**DTU HPC memory interpretation (confirmed by HPC support, A. Bordoni):** DTU HPC's LSF is configured in **per-core** mode — `-M` is interpreted per slot, not per job. `perJobMemLimit = true` would mean "memory is for the whole job" and should NOT be used here. Keep `perJobMemLimit = false` so NF divides `-M` by CPUs.
+Default annotation tool (not Prokka). Full DB at `assets/databases/bakta_db/` (~72 GB). Submit scripts pass `--annotation_tool bakta --baktadb $BACASS_BAKTADB`.
 
-**Two fixes are applied:**
+**pyhmmer pin**: Bakta 1.9.3, GECCO 0.9.10, DeepBGC 0.1.31 are incompatible with pyhmmer >=0.12. Pin via:
+- `conf/bakta_environment.yml` → overridden in `conf/modules.config`
+- `conf/gecco_environment.yml`, `conf/deepbgc_environment.yml` → overridden in `conf/funcscan_overrides.config`
 
-1. **Shadow lsf.conf** (`setup.sh`): DTU HPC's `/lsf/conf/lsf.conf` has `LSB_JOB_MEMLIMIT=Y`. NF auto-detects this and sets `perJobMemLimit=true`, disabling `-M` division. `setup.sh` shadows the file with `LSB_JOB_MEMLIMIT=N` and exports `LSF_ENVDIR` to it, so NF sees `perJobMemLimit=false` and divides `-M` by CPUs correctly.
+## Funcscan (BGC/AMP/ARG Screening)
 
-2. **`perTaskReserve = true`** (`conf/lsf.config`): Controls rusage division. NF auto-detects this from `RESOURCE_RESERVE_PER_TASK` in `lsf.conf` — DTU HPC does not set it, so we set `perTaskReserve = true` explicitly in the executor config. NF then generates a single clean `-R "select[mem>=<total>] rusage[mem=<per-slot>]"` string with rusage correctly divided by CPUs. Source: [NF issue #1071](https://github.com/nextflow-io/nextflow/issues/1071), merged 2019.
+Pipeline chain: bacass → [nf-core/funcscan](https://nf-co.re/funcscan/) v3.0.0 (separate run).
 
-**Result:** For an 8-CPU / 8 GB UNICYCLER job: `-M 1024` (8192/8), `-R "select[mem>=8192] rusage[mem=1024]"` — no conflicting entries, 8 GB total reservation.
+Screening: BGC (antiSMASH, DeepBGC, GECCO), AMP (ampir, amplify, macrel, hmmsearch), ARG (ABRicate, AMRFinderPlus, DeepARG, fARGene, RGI).
 
-**Never set `perJobMemLimit = true`** — this would disable `-M` division.
+**Databases** at `assets/databases/` (gitignored): antismash_db (9.4 GB), deepbgc_db (2.8 GB), card_database_raw (symlink→processed, 65 MB), amrfinderplus_db (237 MB), deeparg_db (4.8 GB), amp_DRAMP_database (11 MB).
 
-**Scheduler polling:** HPC support (A. Bordoni) advised that each `pollInterval` tick translates to a real `bjobs` call that loads the LSF daemon. Keep `pollInterval = '5 min'`. Do not add `submitRateLimit` or `queueStatInterval` — LSF enforces its own submission limits.
+**Key rules**:
+- Launch funcscan from `$(dirname $OUTDIR)`, NOT the bacass project root (avoids nextflow.config collision)
+- `--arg_rgi_db` must point to `card_database_raw` symlink, NOT `card_database_processed` directly
+- `FUNCSCAN_WORK` must be the same dir for test and full run (enables `-resume`)
+- Two `-c` flags: `-c conf/lsf.config -c conf/funcscan_overrides.config`
+- `UNICYCLER`: `scratch = true` (SPAdes I/O intensive; uses `$TMPDIR` on local SSD)
 
-#### Distributed (`submit_bacass_distributed.sh`)
-
-Nextflow runs as a lightweight head process and submits each pipeline task as a separate bsub job via the LSF executor. Tuned for 100+ genome runs: queue size is capped at 8 concurrent jobs to avoid hammering the cluster fairshare, and Unicycler runs in bold/no-correct mode for 2-3x faster assemblies.
-
-| Setting | Value |
-|---|---|
-| Head process | 1 core, 4 GB, 72h |
-| Per-task resources | From base.config labels (up to 24 CPU / 128 GB) |
-| LSF executor config | `conf/lsf.config` |
-| Queue | `hpc` |
-| Max concurrent jobs | 150 (~1200 cores peak at 8 CPUs avg) |
-| `perJobMemLimit` | `false` in `conf/lsf.config` — only divides `-M`, not `rusage` in NF 25.10.4. Rusage fix is the `clusterOptions` closure (see above). Shadow lsf.conf also applied for `-M` correctness. |
-| Poll interval | 5 min (HPC support: shorter intervals hammer the LSF daemon with bjobs calls) |
-| `-resume` | enabled |
-| `--unicycler_args` | `""` (not set by default) |
-
-### I/O performance (`conf/modules.config`)
-
-Unicycler (SPAdes internally) is extremely I/O intensive — thousands of small temp files. Running on network storage is very slow. We set `scratch = true` on the UNICYCLER process so Nextflow stages the task on local scratch (`$TMPDIR`, which LSF sets to a job-specific directory like `/tmp/pbs.<JOBID>.<node>` on the local SSD). Falls back to `/tmp` if `$TMPDIR` is unset.
-
-DTU compute nodes have 480 GB local SSD with ~226 GB available on `/tmp`.
-
-### Wall time choice
-
-LSF wall time is set to 72h (max for `hpc` queue). This does not affect scheduling priority — LSF uses fairshare scheduling based on recent usage, not requested wall time. The 72h limit ensures the head job outlives all individual processes (max single-process time is 32h on retry).
-
-### DTU HPC node types (for reference)
-
-| Node type | Count | Cores | RAM | Local disk |
-|---|---|---|---|---|
-| Huawei XH620 V3 (2660v3) | 47 | 20 | 128 GB | 1 TB SATA |
-| Huawei XH620 V3 (2650v4) | 30 | 24 | 256 GB | 480 GB SSD |
-| Huawei XH620 V3 (2650v4) | 6 | 24 | 512 GB | 480 GB SSD |
-| ThinkSystem SD530 (6126) | 24 | 24 | 384-768 GB | 480 GB SSD |
-| ThinkSystem SD530 (6226R) | 28 | 32 | 384-768 GB | 480 GB SSD |
-| ThinkSystem SD530 (6142) | 4 | 32 | 384 GB | 480 GB SSD |
-| ThinkSystem SD630 V2 | 4 | 48 | 512 GB | 480 GB SSD |
-| ThinkSystem SR630 V3 | 2 | 64 | 1024 GB | — |
-| AMD EPYC (various) | 6 | 64-128 | 512-1536 GB | — |
-
-We target the 47 smallest (20-core / 128 GB) Huawei nodes as the baseline, so all jobs can schedule on any node. Note: the 47 smallest nodes have SATA disks (not SSD), so `scratch = true` is slower there but still faster than network storage.
-
-### Annotation tool choice
-
-We use **Bakta** (not Prokka) as the default annotation tool. Bakta provides more comprehensive annotation using the full UniProt database and produces `.gbff` (GenBank) and `.faa` (protein FASTA) files that feed directly into downstream BGC screening with nf-core/funcscan.
-
-The Bakta full database (~72 GB) is stored in `assets/databases/bakta_db/` and referenced via `$BACASS_BAKTADB` in `setup.sh`. The submit scripts pass `--annotation_tool bakta --baktadb $BACASS_BAKTADB`.
-
-**pyhmmer compatibility**: Bakta 1.9.3, GECCO 0.9.10, and DeepBGC 0.1.31 are all incompatible with pyhmmer >=0.12.0 (`hit.name`/`hmm.accession` changed from `bytes` to `str`). We pin `pyhmmer<0.12` via custom environment YAMLs:
-- **Bakta**: `conf/bakta_environment.yml`, overridden in `conf/modules.config` with `conda = "${projectDir}/conf/bakta_environment.yml"`
-- **GECCO**: `conf/gecco_environment.yml`, overridden in `conf/funcscan_overrides.config`
-- **DeepBGC**: `conf/deepbgc_environment.yml`, overridden in `conf/funcscan_overrides.config`
-
-The funcscan overrides are passed via `-c conf/funcscan_overrides.config` in `submit_funcscan.sh`. The config reads `$BACASS_DIR` (exported in the submit script) to resolve the YAML paths.
-
-### Downstream BGC screening with nf-core/funcscan
-
-For functional screening we chain bacass output into [nf-core/funcscan](https://nf-co.re/funcscan/) v3.0.0 as a separate pipeline rather than integrating tools directly into bacass. This keeps bacass clean and leverages funcscan's full screening suite.
-
-**Pipeline chain**: bacass (assembly + Bakta annotation) → funcscan (BGC + AMP + ARG screening)
-
-Funcscan runs three screening modules:
-- **BGC screening**: antiSMASH, DeepBGC, GECCO (biosynthetic gene clusters)
-- **AMP screening**: ampir, amplify, macrel, hmmsearch (antimicrobial peptides)
-- **ARG screening**: ABRicate, AMRFinderPlus, DeepARG, fARGene, RGI (antimicrobial resistance genes)
-
-#### Bridging script (`bacass_to_funcscan.sh`)
-
-The bridging script auto-generates the funcscan samplesheet from bacass results. It scans the results directory for assembly FASTAs (Unicycler or Dragonflye) and annotation output (Bakta `.gbff`/`.faa` or Prokka `.gbk`/`.faa`), then writes a 4-column CSV (`sample,fasta,protein,gbk`). Funcscan accepts pre-annotated input, so it skips re-annotation and goes straight to screening.
-
-| Funcscan input | Bacass output | Source directory |
-|---|---|---|
-| `fasta` | Assembly FASTA | `results/Unicycler/` or `results/Dragonflye/` |
-| `protein` | `.faa` protein FASTA | `results/Bakta/<sample>/` or `results/Prokka/<sample>/` |
-| `gbk` | `.gbff` or `.gbk` GenBank file | `results/Bakta/<sample>/` or `results/Prokka/<sample>/` |
-
-#### Funcscan submission — distributed (`submit_funcscan.sh`)
-
-Funcscan uses the same distributed LSF executor pattern as bacass: a lightweight head process (1 core / 4 GB) submits each screening task as a separate LSF job via `conf/lsf.config`. This is essential for 100+ genomes because funcscan runs ~15 tools per sample — on a single node those would serialize and take days.
-
-| Setting | Value | Reasoning |
-|---|---|---|
-| Head process | 1 core, 4 GB, 72h | Lightweight — only dispatches sub-jobs |
-| Per-task resources | From funcscan's process labels | Each tool gets its own LSF job with appropriate resources |
-| LSF executor config | `conf/lsf.config` (shared with bacass) | Same queue, same limits — 150 concurrent jobs |
-| Conda env overrides | `conf/funcscan_overrides.config` | Pins `pyhmmer<0.12` for GECCO and DeepBGC via custom environment YAMLs |
-| Wall time | 72h | Head job must outlive all sub-jobs; 72h is max for `hpc` queue |
-| `-resume` | enabled | Safe to resubmit after interruption — skips completed tasks |
-
-**Two `-c` config files**: The nextflow command passes both `-c conf/lsf.config` (LSF executor settings) and `-c conf/funcscan_overrides.config` (conda environment overrides for GECCO/DeepBGC). Nextflow merges multiple `-c` configs in order, so both take effect.
-
-**Databases**: all pre-downloaded to `assets/databases/` (gitignored):
-
-| Tool | Path | Size |
-|---|---|---|
-| antiSMASH | `assets/databases/antismash_db/` | 9.4 GB |
-| DeepBGC | `assets/databases/deepbgc_db/` | 2.8 GB |
-| CARD/RGI | `assets/databases/card_database_raw` (symlink → `card_database_processed/`) | 65 MB |
-| AMRFinderPlus | `assets/databases/amrfinderplus_db/` | 237 MB |
-| DeepARG | `assets/databases/deeparg_db/` | 4.8 GB |
-| DRAMP (AMPcombi2) | `assets/databases/amp_DRAMP_database/` | 11 MB |
-
-Note: `--arg_rgi_db` must point to `card_database_raw` (a symlink to `card_database_processed/`), NOT to `card_database_processed` directly. **funcscan v3.0.0 bug**: the skip check uses `rgi_db.contains("card_database_processed")` on a `Path` (Iterable<Path>), which never matches a String — so `RGI_CARDANNOTATION` always runs. Inside the module, `mkdir card_database_processed` collides with the staged input when the input dir IS named `card_database_processed`. The `card_database_raw` symlink avoids the collision. All paths are hardcoded in `submit_funcscan_distributed.sh`.
-
-**Config collision**: funcscan must NOT be launched from the bacass project root (`/work3/josne/github/bacass`) because bacass's `nextflow.config` would be auto-loaded, causing samplesheet validation to use bacass's schema (expects `ID` column) instead of funcscan's (expects `sample` column). The `submit_funcscan_distributed.sh` script launches from `$(dirname $OUTDIR)` (the project data directory), which has no `nextflow.config`. This also ensures `.nextflow/cache/` persists between runs so `-resume` works correctly. Do NOT use `mktemp -d` as the launch dir — the temp dir is deleted after the run, destroying the cache.
-
-**`.nextflow.log` location**: bacass writes its log to `${BACASS_DIR}/.nextflow.log` (via `cd "${BACASS_DIR}"` in the submit script). Funcscan writes its log to the temp launch dir, which is deleted after the job ends. For debugging funcscan failures, use the LSF job output file (`funcscan_head_<JOBID>.out`) instead — it captures all Nextflow console output.
-
-**Portability**: `NXF_HOME` is set project-local in `setup.sh`, so pulled pipelines (like funcscan) are cached in `.nextflow_home/assets/` rather than `~/.nextflow/`. Conda environments are shared via `NXF_CONDA_CACHEDIR`. Funcscan uses a separate work directory (`work_funcscan/`) to avoid collisions with bacass.
+**Samplesheet**: `./bacass_to_funcscan.sh <results_dir> <output.csv>` → 4-column CSV (sample, fasta, protein, gbk).
 
 ## Repository Layout
 
 ```
-main.nf                         # Entry point — includes workflows/bacass.nf
-workflows/bacass.nf             # Main workflow logic (~695 lines)
-nextflow.config                 # Pipeline configuration, profiles, env settings
-nextflow_schema.json            # Parameter schema (validated by nf-schema plugin)
-setup.sh                        # Environment setup (conda, nextflow, DB paths)
-submit_bacass.sh                # LSF single-node submit script
-submit_bacass_distributed.sh    # LSF distributed submit script
-bacass_to_funcscan.sh           # Generate funcscan samplesheet from bacass results
-submit_funcscan_distributed.sh  # LSF distributed submit script for nf-core/funcscan
+main.nf / workflows/bacass.nf   # Entry point / main workflow
+nextflow.config                 # Profiles, params defaults
+setup.sh                        # Conda + Nextflow env setup
+submit_bacass.sh                # Single-node LSF submit
+submit_bacass_distributed.sh    # Distributed LSF submit
+bacass_to_funcscan.sh           # Generate funcscan samplesheet
+submit_funcscan_distributed.sh  # Funcscan LSF submit
 conf/
-  base.config                   # Resource labels, tuned for DTU HPC 20-core/128GB
-  lsf.config                    # LSF executor config for distributed runs
-  modules.config                # Per-process ext.args, publishDir, scratch, ext.when
-  bakta_environment.yml         # Bakta conda env with pyhmmer<0.12 pin
-  test*.config                  # 10 test profiles
-modules/
-  nf-core/                      # 25+ downloaded nf-core modules (DO NOT edit by hand)
-  local/                        # 7 custom modules
-subworkflows/
-  nf-core/                      # 4 nf-core subworkflows (DO NOT edit by hand)
-  local/                        # 4 local subworkflows
-bin/                            # Python helper scripts
-tests/                          # nf-test files (*.nf.test) and snapshots (*.nf.test.snap)
-assets/
-  databases/                    # Databases: Kraken2, Kmerfinder, Bakta, antiSMASH, DeepBGC, CARD, AMRFinderPlus, DeepARG, DRAMP (gitignored)
-  multiqc_config*.yml           # MultiQC configs per assembly type
-.conda_envs/                    # Pre-built conda environments (gitignored)
-.nextflow_home/                 # Nextflow home: pulled pipelines, plugins (gitignored)
-docs/                           # usage.md, output.md, images/
+  base.config                   # Resource labels
+  lsf.config                    # LSF executor (perTaskReserve, pollInterval)
+  modules.config                # ext.args, publishDir, scratch, resource overrides
+  bakta_environment.yml         # pyhmmer<0.12 pin for Bakta
+  gecco_environment.yml         # pyhmmer<0.12 pin for GECCO
+  deepbgc_environment.yml       # pyhmmer<0.12 pin for DeepBGC
+  funcscan_overrides.config     # GECCO/DeepBGC conda overrides + resource fixes
+modules/nf-core/                # DO NOT edit — use nf-core modules update/install
+modules/local/                  # 7 custom modules
+bin/                            # Python helpers + libnfs_retry.so (LD_PRELOAD)
+assets/databases/               # All databases (gitignored)
+.conda_envs/                    # Pre-built conda envs (gitignored)
+.nextflow_home/                 # NXF_HOME: pulled pipelines, plugins (gitignored)
 ```
-
-## Key Files You Will Touch Most Often
-
-| File | Purpose |
-|---|---|
-| `submit_bacass.sh` | Edit INPUT, OUTDIR, ASSEMBLY_TYPE for each run |
-| `submit_bacass_distributed.sh` | Same, for distributed runs |
-| `bacass_to_funcscan.sh` | Generate funcscan samplesheet from bacass results |
-| `submit_funcscan_distributed.sh` | Submit nf-core/funcscan BGC screening job (edit INPUT, OUTDIR, FUNCSCAN_WORK) |
-| `conf/modules.config` | Configure process args (`ext.args`), publishDir, scratch, `ext.when`, Bakta conda override |
-| `conf/bakta_environment.yml` | Bakta conda env spec with pyhmmer<0.12 pin |
-| `conf/gecco_environment.yml` | GECCO conda env spec with pyhmmer<0.12 pin |
-| `conf/deepbgc_environment.yml` | DeepBGC conda env spec with pyhmmer<0.12 pin |
-| `conf/funcscan_overrides.config` | Nextflow config overriding GECCO/DeepBGC conda envs for funcscan |
-| `conf/base.config` | Resource allocation (CPUs, memory, time per label, hard ceilings) |
-| `conf/lsf.config` | LSF executor tuning (queue, queue size, submit rate) |
-| `workflows/bacass.nf` | Main workflow — add/remove steps, wire channels |
-| `nextflow.config` | Profiles, params defaults, env block |
-| `nextflow_schema.json` | Parameter definitions for `--help` and validation |
-| `modules/local/*/main.nf` | Custom process definitions |
-| `setup.sh` | Environment setup (change if conda/nextflow paths move) |
 
 ## Coding Conventions
 
-### Nextflow / Groovy Style
+- **Indentation**: 4 spaces (Nextflow/Groovy), 2 spaces (YAML/MD/JSON)
+- **Line width**: 120 chars (Prettier enforced via `.prettierrc.yml`)
+- **Process names**: `UPPER_CASE`; **channels**: `ch_` prefix, `snake_case`; **params**: `snake_case`; **vars inside processes**: `camelCase`
+- **NEVER edit** `modules/nf-core/` or `subworkflows/nf-core/`; `modules.json` auto-managed
 
-- **Indentation**: 4 spaces (Nextflow/Groovy), 2 spaces (YAML, Markdown, JSON)
-- **Line width**: 120 characters max (Prettier enforced)
-- **Process names**: `UPPER_CASE` (e.g., `FASTQC`, `KRAKEN2`, `PROKKA`)
-- **Channel names**: `ch_` prefix, `snake_case` (e.g., `ch_reads_for_assembly`)
-- **Parameters**: `snake_case` (e.g., `assembly_type`, `skip_kraken2`)
-- **Variables inside processes**: `camelCase` (e.g., `def prefix`, `def args`)
-
-### nf-core Module Rules
-
-- **NEVER edit files under `modules/nf-core/` or `subworkflows/nf-core/`**. Use `nf-core modules update/install`.
-- `modules.json` tracks installed module versions — do not edit manually.
-- Local modules in `modules/local/` follow the same structure.
-
-### Process Structure Template
+### Process Template
 
 ```groovy
 process TOOLNAME {
     tag "$meta.id"
     label 'process_medium'
-
     conda "${moduleDir}/environment.yml"
-    container "biocontainers/tool:version"
-
-    input:
-    tuple val(meta), path(reads)
-
-    output:
-    tuple val(meta), path("*.ext"), emit: result
-    path "versions.yml"         , emit: versions
-
-    when:
-    task.ext.when == null || task.ext.when
-
+    input:  tuple val(meta), path(reads)
+    output: tuple val(meta), path("*.ext"), emit: result
+            path "versions.yml", emit: versions
+    when: task.ext.when == null || task.ext.when
     script:
     def args   = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
-    tool command $args $reads -o ${prefix}.ext
-
+    tool $args $reads -o ${prefix}.ext
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         tool: \$(tool --version 2>&1 | sed 's/.*v//')
@@ -319,154 +153,61 @@ process TOOLNAME {
 
 ## Pipeline Parameters
 
-- `--assembly_type`: `short`, `long`, or `hybrid` (required)
+- `--assembly_type`: `short` | `long` | `hybrid` (required)
 - `--assembler`: `unicycler` (default), `canu`, `miniasm`, `dragonflye`
-- `--annotation_tool`: `prokka` (pipeline default), `bakta` (our default), `dfast`, `liftoff`
-- `--baktadb`: path to Bakta database (use `$BACASS_BAKTADB` from setup.sh)
-- `--polish_method`: `medaka` (default), `nanopolish`
-- `--kraken2db`: path to Kraken2 database (`.tgz` or directory)
-- `--kmerfinderdb`: path to Kmerfinder database
-- `--unicycler_args`: extra args passed to Unicycler (e.g., `"--mode bold"` for faster assembly)
-- `--skip_*`: skip individual steps (`--skip_kraken2`, `--skip_busco`, `--skip_annotation`, etc.)
+- `--annotation_tool`: `bakta` (our default), `prokka`, `dfast`, `liftoff`
+- `--baktadb`, `--kraken2db`, `--kmerfinderdb`: database paths
+- `--unicycler_args`: e.g., `"--mode bold"` for 2-3× faster assembly
+- `--skip_*`: `--skip_kraken2`, `--skip_busco`, `--skip_annotation`, etc.
 
-## Testing
-
-### Framework: nf-test
+## Testing & Linting
 
 ```bash
-nf-test test --profile docker                                      # all tests
-nf-test test tests/default.nf.test --profile docker                # specific test
-nf-test test tests/default.nf.test --profile docker --update-snapshot  # update snapshots
+nf-test test --profile docker                          # all tests
+nf-test test tests/default.nf.test --profile docker    # single test
+npx prettier@3.6.2 --check .                           # lint
+nf-core pipelines lint                                 # nf-core check
 ```
 
-### Available tests
-
-`default`, `hybrid`, `hybrid_dragonflye`, `long`, `long_miniasm`, `long_miniasm_prokka`, `long_dragonflye`, `long_liftoff`, `dfast`
-
-## Linting
-
-```bash
-npx prettier@3.6.2 --check .       # check formatting
-npx prettier@3.6.2 --write .       # fix formatting
-nf-core pipelines lint             # nf-core standards check
-```
-
-Config: `.prettierrc.yml` (120 char width, 4-space indent, 2-space for YAML/MD/JSON)
-
-## Git & CI Workflow
-
-- **Main branch**: `master` (releases)
-- **Development branch**: `dev` (PRs target here)
-- **Commit style**: lowercase, descriptive
-- **CI on PR**: Prettier check, nf-core lint, nf-test matrix (conda/docker/singularity x 2 NF versions)
-- **Pre-commit hooks**: Prettier, trailing whitespace, end-of-file fix
+Tests: `default`, `hybrid`, `hybrid_dragonflye`, `long`, `long_miniasm`, `long_miniasm_prokka`, `long_dragonflye`, `long_liftoff`, `dfast`
 
 ## Common Tasks
 
-### Add a new local module
-
-1. Create `modules/local/toolname/main.nf` + `environment.yml`
-2. Include in `workflows/bacass.nf`
-3. Add process config in `conf/modules.config`
-4. Wire channels in the workflow
-
-### Add a new nf-core module
-
 ```bash
+# Add nf-core module
 nf-core modules install <module_name>
-```
 
-### Modify process arguments (without editing modules)
+# Override process args (conf/modules.config)
+withName: 'PROKKA' { ext.args = '--kingdom Bacteria' }
 
-Edit `conf/modules.config`:
-```groovy
-withName: 'PROKKA' {
-    ext.args = '--kingdom Bacteria --genus MyGenus'
-}
-```
+# Enable local scratch for I/O-heavy process
+withName: 'CANU' { scratch = true }
 
-### Enable local scratch for an I/O-heavy process
-
-Add `scratch = true` in `conf/modules.config` (uses `$TMPDIR` → local SSD):
-```groovy
-withName: 'CANU' {
-    scratch = true
-}
-```
-
-### Change resource limits for a different HPC
-
-Edit `conf/base.config` — adjust `params.max_cpus`, `params.max_memory`, `params.max_time` and the label values. The `check_max()` function ensures nothing exceeds the ceilings.
-
-### Run BGC screening after bacass
-
-```bash
-# 1. Generate the full samplesheet from bacass results
-./bacass_to_funcscan.sh /path/to/Bacass_results funcscan_samplesheet_full.csv
-# → writes funcscan_samplesheet_full.csv (all completed samples)
-
-# 2. (Recommended) Create a 5-sample test subset first
-head -6 funcscan_samplesheet_full.csv > funcscan_samplesheet_test.csv
-
-# 3. Edit submit_funcscan_distributed.sh — three variables in the EDIT section:
-#    INPUT     → path to test or full samplesheet
-#    OUTDIR    → results directory (same for test and full run)
-#    FUNCSCAN_WORK → project-specific work dir (same for test and full run — required for -resume)
-
-# 4. Submit the test run
+# Run funcscan after bacass
+./bacass_to_funcscan.sh /path/to/results samplesheet.csv
+head -6 samplesheet.csv > samplesheet_test.csv   # 5-sample test first
 bsub < submit_funcscan_distributed.sh
-
-# 5. Once the test passes, switch to full samplesheet and resume
-#    Only change INPUT in submit_funcscan_distributed.sh:
-#    INPUT=".../funcscan_samplesheet_full.csv"
-bsub < submit_funcscan_distributed.sh   # -resume reuses the 5 already-completed samples
-
-# Monitor
-tail -f funcscan_head_*.out   # Nextflow console output (note: .nextflow.log goes to temp dir and is deleted)
-bjobs -u $USER -w
 ```
 
-The bridging script scans the results directory, pairs each sample's assembly FASTA with its annotation files (`.faa` + `.gbff`/`.gbk`), and writes a 4-column CSV. Samples with missing files are skipped with a warning. Funcscan skips re-annotation when pre-annotated files are provided.
+## Troubleshooting
 
-**Critical**: `FUNCSCAN_WORK` must point to the same directory for both the test run and the full run — this is how `-resume` reuses cached work from the 5 test samples. Keep `OUTDIR` the same too.
-
-### Troubleshooting
-
-- **"conda: command not found"** in bsub job: ensure `#!/bin/bash` shebang and that `setup.sh` sources `conda.sh` before `conda activate`
-- **"Run conda init first"**: `conda.sh` must be sourced before `conda activate` — already handled in `setup.sh`
-- **Lock file error after killed job**: delete `.nextflow/cache/*/db/LOCK` and re-run with `-resume`
-- **SPAdes/Unicycler slow**: `scratch = true` is already set in modules.config; also consider `--unicycler_args "--mode bold"` for faster assembly
-- **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta, GECCO, DeepBGC): pyhmmer >=0.12 broke all three tools. Fixed via custom environment YAMLs that pin `pyhmmer<0.12`: `conf/bakta_environment.yml` (applied through `conf/modules.config`), `conf/gecco_environment.yml` and `conf/deepbgc_environment.yml` (applied through `conf/funcscan_overrides.config` passed with `-c` in `submit_funcscan_distributed.sh`)
-- **Funcscan "Missing required field(s): ID"**: bacass's `nextflow.config` is being loaded instead of funcscan's. The `submit_funcscan_distributed.sh` avoids this by launching from a temp directory. If running interactively, `cd` to a directory without a `nextflow.config`
-- **Funcscan `GECCO_RUN` — "mv: are the same file"**: GECCO outputs flat files named `${input.baseName}.*`. When `input.baseName` == `meta.id`, the mv is a rename-to-self. Fix: `ext.prefix = { "${meta.id}_gecco" }` in `conf/funcscan_overrides.config` — mv renames `S0204.*` → `S0204_gecco.*` and succeeds. NF collects outputs normally. A `publishDir` override additionally strips the `_gecco` infix from published filenames (`filename.replaceFirst("^${meta.id}_gecco", "${meta.id}")`) so files land as `bgc/gecco/${meta.id}/${meta.id}.clusters.tsv`, `${meta.id}.genes.tsv`, `${meta.id}_cluster_1.gbk`, etc. — matching the clean per-sample layout used for DeepBGC.
-- **Funcscan `DEEPBGC_PIPELINE` and `DEEPARG_PREDICT` — running single-threaded / tasks killed by wall time**: funcscan allocates 1 CPU to both. HMMER `hmmscan` (DeepBGC) and diamond (DeepARG) auto-detect available CPUs — with 1 allocated they run single-threaded. DeepBGC calls the external `hmmscan` binary per contig via subprocess (not pyhmmer); no `--cpu` flag is passed; HMMER reads its thread count from the CPU affinity/cgroup set by LSF. Vibrio assemblies with 80+ contigs take 3–5h per contig at 1 CPU = hundreds of hours total, exceeding the 24h wall time. Fix: in `conf/funcscan_overrides.config`, set fixed resources (not `* task.attempt` — failures are node-specific conda errors, not OOM): `DEEPBGC_PIPELINE`: `cpus=10, memory=16.GB, time=48.h, scratch=true, maxRetries=10`; `DEEPARG_PREDICT`: `cpus=8, memory=8.GB, time=4.h, scratch=true`. Note: `scratch=true` writes intermediate files (protein FASTA, .domtbl) to local disk; the Pfam/diamond DB is still accessed via NFS symlink (NF stages inputs as symlinks, not copies). Verified Mar 2026 via `bpeek`: 780-CDS contig completed in 17m 50s with 10 CPUs vs 5h 7m for a 528-CDS contig with 1 CPU (~17× speedup). After editing config, `bkill <head_jobid>` and resubmit with `-resume`.
-- **Funcscan `DEEPBGC_PIPELINE` — mv double-suffix bug**: DeepBGC creates a subdirectory named `${prefix}/`. After renaming the directory (`genome.baseName/` → `prefix/`), the file-level mv loop does `${i/genome.baseName/prefix}` on full paths. Default (`prefix == meta.id == "S0679"`, `genome.baseName == "S0679"`): the dir rename is skipped (same name), then `${i/S0679/S0679}` is a rename-to-self → `bash -e` exits with error. Fix: `ext.prefix = "deepbgc"` (static string, never a substring of any sample ID) in `conf/funcscan_overrides.config`. Trace: (1) `mv S0679/ deepbgc/` ✓; (2) `${i/S0679/deepbgc}` where `i=./deepbgc/S0679.bgc.tsv` → `./deepbgc/deepbgc.bgc.tsv` ✓. Module output `${prefix}/${prefix}.bgc.tsv = deepbgc/deepbgc.bgc.tsv` is collected; COMBGC runs with all three tools. Note: `${meta.id}_deepbgc` does NOT fix this — after dir rename to `S0679_deepbgc/`, the path `./S0679_deepbgc/S0679.bgc.tsv` still contains `S0679`, so the substitution hits the directory component → `./S0679_deepbgc_deepbgc/` which doesn't exist.
-- **Funcscan `RGI_CARDANNOTATION` — "mkdir: cannot create directory 'card_database_processed': File exists"**: funcscan v3.0.0 bug — `rgi_db.contains("card_database_processed")` on a `Path` always returns false (Path.contains() checks Iterable elements, never matches a String), so `RGI_CARDANNOTATION` always runs. When `--arg_rgi_db` points to a dir named `card_database_processed`, the staged input collides with the module's `mkdir card_database_processed`. Fix: pass `assets/databases/card_database_raw` (a symlink to `card_database_processed/`) — already configured in `submit_funcscan_distributed.sh`.
-- **NCBI download BadZipFile**: the `bin/download_reference.py` fix strips assembly-name suffixes from kmerfinder accessions (e.g., `GCF_003345295.1_ASM334529v1` → `GCF_003345295.1`) and validates zip files before extraction
-- **"Multiple -R resource requirement strings are not supported"** in distributed mode: LSF rejects multiple `-R` flags for span/affinity sections. The fix was to remove `clusterOptions = '-R "span[hosts=1]"'` from `conf/lsf.config` — single-process tasks don't need it since LSF places them on one host by default
-- **Jobs stuck PEND — "Resource (mem) limit defined on queue has been reached"**: NF 25.10.4 does not divide `rusage[mem=X]` by CPUs — a 16-CPU/40 GB job gets `rusage[mem=40960]` per slot = 640 GB total; no 128 GB node can host this. Two-part fix already applied: (1) **shadow lsf.conf** in `setup.sh` — forces NF to see `LSB_JOB_MEMLIMIT=N` so it divides `-M` by CPUs; (2) **`perTaskReserve = true`** in `conf/lsf.config` — NF divides `rusage[mem=X]` by CPUs and generates one clean `-R "select[mem>=<total>] rusage[mem=<per-slot>]"`. Verify: `bjobs -l <jobid>` should show a single `-R` string with `rusage[mem=<task.memory/cpus>]`. If broken again: kill head and resubmit with `-resume`.
-- **Fairshare priority depleted / jobs stuck PEND for >24h**: LSF fairshare on DTU HPC decays slowly. Running 65+ samples in distributed mode can burn fairshare and drop priority significantly. Resource overrides in `conf/modules.config` right-size over-provisioned processes (KRAKEN2, RACON, MEDAKA, LIFTOFF, MINIASM) to reduce fairshare consumption. If already stuck: kill everything and resubmit with `-resume` after priority recovers.
-- **`KMERFINDER_SUMMARY` — `ModuleNotFoundError: No module named 'yaml'`**: `modules/local/kmerfinder/summary/main.nf` was missing the `conda` directive (unlike the sibling `KMERFINDER` and `DOWNLOAD_REFERENCE` modules which both have it). Without it, NF runs `csv_to_yaml.py` with the bare shell Python which has no pyyaml. Fix: add `conda "${moduleDir}/environment.yml"` to the process (already applied).
-- **Funcscan `ANTISMASH_ANTISMASH` — `blastp returned 127: libblastinput.so: cannot open shared object file`**: Only samples with thiopeptide-like gene clusters trigger `antismash/modules/thiopeptides/specific_analysis.py` → `comparippson.compare_precursor_cores()` → `run_simple_blastp()` → subprocess call to `blastp`. The `blastp` binary has RPATH `$ORIGIN/../lib/ncbi-blast+` (confirmed via `readelf`). The library IS present in `lib/ncbi-blast+/`, but on some DTU HPC compute nodes `$ORIGIN` RPATH resolution fails. Fix: add a conda activation script to the antiSMASH env that sets `LD_LIBRARY_PATH` as a fallback: create `.conda_envs/env-3afb2e6d352a088017e79a544d2d4222/etc/conda/activate.d/ncbi_blast_lib.sh` with `export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib/ncbi-blast+:${LD_LIBRARY_PATH:-}"`. Verify: after `conda activate .conda_envs/env-3afb2e6d352a088017e79a544d2d4222`, `echo $LD_LIBRARY_PATH` should contain `lib/ncbi-blast+`. NF hashes the env by `environment.yml` content, not file contents → cached ANTISMASH results remain valid. If the antiSMASH env is rebuilt (new hash), recreate the activation script in the new env directory. Also add a matching `deactivate.d/ncbi_blast_lib.sh` to clean up. Resume the funcscan run after applying.
-- **Bakta — `ERROR: Circos could not be executed!`** on some compute nodes: `circos` uses `#!/usr/bin/env perl`. On certain DTU HPC nodes, `env perl` resolves to a different Perl than the conda env's, causing Perl module loading to fail when Bakta runs the `circos --version` dependency check. Fix: patch the shebang in the pre-built conda env to use the absolute Perl path — this modifies the env file without changing `environment.yml`, so NF task hashes are unaffected and cached results remain valid: `sed -i "1s|#!/usr/bin/env perl|#!/work3/josne/github/bacass/.conda_envs/env-9993abf917246d595cbd4fd0d31a2b65/bin/perl|" .conda_envs/env-9993abf917246d595cbd4fd0d31a2b65/bin/circos`. Note: if the Bakta env is ever rebuilt (new env hash), reapply this patch to the new env. The circos plot is not used downstream (not published, not needed by funcscan).
-- **Any funcscan task — `line 338: /bin/activate: No such file or directory`** (conda activation fails): Nextflow activates conda envs with `source $(conda info --json | awk '/conda_prefix/ ...')/bin/activate`. If `conda info --json` returns empty output (because conda's Python modules fail to import from NFS, or the conda script itself can't be opened from NFS), awk extracts nothing and the path becomes `/bin/activate`. Two-layer fix applied to `/work3/josne/miniconda3/bin/conda`: (1) bash wrapper replacing the Python entry-point script (`python -c '...'` instead of `python script.py`, so NFS never needs to open the script file); (2) short-circuit for `conda info --json` specifically — outputs the hardcoded prefix with zero Python imports, making conda activation completely NFS-independent. UNCHECKED_HASH also applied to the conda package for all other calls. Current wrapper:
-  ```bash
-  #!/bin/bash
-  if [ "${1:-}" = "info" ] && [ "${2:-}" = "--json" ]; then
-      printf '{\n  "conda_prefix": "/work3/josne/miniconda3"\n}\n'
-      exit 0
-  fi
-  exec /work3/josne/miniconda3/bin/python -c '
-  import sys
-  sys.argv[0] = "/work3/josne/miniconda3/bin/conda"
-  if len(sys.argv) > 1 and sys.argv[1].startswith("shell.") and sys.path and sys.path[0] == "":
-      del sys.path[0]
-  from conda.cli import main
-  sys.exit(main())
-  ' "$@"
-  ```
-  Verify: `conda info --json | awk '/conda_prefix/ { gsub(/"|,/, "", $2); print $2 }'` should print `/work3/josne/miniconda3`. Also verify `conda --version` works. To restore original: `cp /work3/josne/miniconda3/bin/conda.bak /work3/josne/miniconda3/bin/conda`.
-- **Funcscan `DEEPARG_PREDICT` — Theano JIT compilation fails with missing C header** (`_neighborhood_iterator_imp.h`, `funcobject.h`, or any other NFS-flaky header, exit code 1): Theano JIT-compiles C extensions at runtime reading C headers from NFS (`env-cff2.../include/python2.7/` and numpy headers). NFS intermittently serves file metadata but fails the actual `open()` — any header can fail, making per-header inlining unsustainable (whack-a-mole). **Permanent fix**: pre-warmed persistent Theano compiledir so tasks reuse pre-compiled `.so` files — no C headers ever read. Two parts: (1) `sitecustomize.py` in `env-cff2f9eb868a1390a5c010baca2d8104/lib/python2.7/` intercepts `THEANO_FLAGS` at Python startup (before Theano reads its config) and redirects `base_compiledir` to the persistent cache, overriding the per-task `/tmp/...` path set by the funcscan module script; (2) persistent cache pre-warmed on the login node → 45 `.so` files in `env-cff2.../theano_persistent_cache/`. Verify: `export THEANO_FLAGS="base_compiledir=/tmp/fake" && env-cff2.../bin/python2.7 -c "import theano; print(theano.config.base_compiledir)"` should print the persistent path. As a safety net, `DEEPARG_PREDICT` also has `maxRetries=5` and `errorStrategy` that retries on exit code 1 in `conf/funcscan_overrides.config`. Note: `_neighborhood_iterator_imp.h` has also been inlined into `ndarraytypes.h` (numpy) as an additional layer but the persistent cache is the primary fix. If the DeepARG env is rebuilt (new hash): recreate `sitecustomize.py`, recreate `theano_persistent_cache/` by pre-warming (see MEMORY.md).
-- **Funcscan `ANTISMASH_ANTISMASH` — `FileNotFoundError: .../antismash/outputs/html/templates/cds_detail.html`**: antiSMASH's Jinja2 `FileSystemLoader` opens `.html` template files lazily at render time (during `write_outputs`). NFS intermittently fails the `open()` call even though the file exists. Fix: patch `FileTemplate.__init__` in `env-3afb.../lib/python3.11/site-packages/antismash/common/html_renderer.py` to pre-load all templates from the search paths into a `jinja2.DictLoader` at init time (with 5-attempt retry + exponential backoff per file). `super().__init__()` is called without `search_path` (→ `BaseLoader`), then `self.env.loader` is replaced with the `DictLoader`. This reads all `.html` files once at class construction, so no NFS opens occur at render time. Any `FileNotFoundError` during pre-loading retries up to 5 times with 1/2/4/8s sleep. If the antiSMASH env is rebuilt (new hash), reapply this patch to the new `html_renderer.py`.
-- **Funcscan — any tool fails with `python: can't open file '/env/.../bin/toolname': [Errno 2]`** (exit code 1 or 2, NFS failure on Python entry-point scripts): All funcscan Python tool scripts (`hamronize`, `rgi`, `antismash`, `deepbgc`, `deeparg`, `ampcombi`, `argnorm`, `macrel`) have been replaced with `#!/bin/bash` wrappers using `exec python - "$@" << 'PYEOF' ... PYEOF` heredoc. Python reads the code from the heredoc, never opens the script file from NFS. Originals backed up to `.bak`. UNCHECKED_HASH applied to all Python 3.x site-packages. `amrfinder` (ELF binary), `abricate` (Perl), `fargene`/`gecco`/`AMPlify` (shell wrappers) are unaffected. Wrapper pattern: `#!/bin/bash\nexec /env/bin/pythonX.Y - "$@" << 'PYEOF'\nimport sys\nsys.argv[0] = '/env/bin/toolname'\n# original script body\nPYEOF`. If an env is rebuilt (new hash), reapply the bash wrapper to the new env's `bin/toolname`.
-- **Any task — intermittent `FileNotFoundError`/`ENOENT` on BeeGFS files (catch-all)**: The LD_PRELOAD library `bin/libnfs_retry.so` is injected via `beforeScript` in `conf/modules.config` and `conf/funcscan_overrides.config`. It intercepts `open`/`openat`/`fopen` and retries on ENOENT using **stat-based discrimination**: when `open()` returns ENOENT, call `stat()` on the same path — if `stat()` also returns ENOENT it's a genuine miss (return immediately, no retry); if `stat()` succeeds the file exists but BeeGFS failed to serve it (spurious ENOENT) → retry with two-phase timing: 3×50ms + 5s + 20s. This requires no path filtering and adds only one `stat()` call per genuine ENOENT. To rebuild after GCC update: `gcc -O2 -Wall -fPIC -shared -o bin/libnfs_retry.so bin/libnfs_retry.c -ldl -Wl,-soname,libnfs_retry.so` then re-commit the `.so`. The existing per-tool fixes (UNCHECKED_HASH, bash wrappers, DictLoader, Theano cache) are kept as belt-and-suspenders — they eliminate NFS reads entirely rather than retrying them.
+- **Jobs PEND "Resource (mem) limit"**: LSF memory fix not active — check shadow lsf.conf and `perTaskReserve = true` in `conf/lsf.config`. Verify: `bjobs -l <id>` shows single `-R` with divided rusage.
+- **"conda: command not found" / "Run conda init first"**: ensure `#!/bin/bash` and `conda.sh` sourced in `setup.sh`
+- **`/bin/activate: No such file or directory`**: `conda info --json` returning empty (NFS failure). Fix: `/work3/josne/miniconda3/bin/conda` is already patched to short-circuit `conda info --json`. See MEMORY.md.
+- **Spurious ENOENT on BeeGFS files**: `bin/libnfs_retry.so` LD_PRELOADed via `beforeScript` AND exported in `setup.sh` so bash itself loads the library (protects bash `source` builtins including conda activation). See MEMORY.md to rebuild.
+- **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta/GECCO/DeepBGC): pyhmmer >=0.12 incompatibility. Fixed via `pyhmmer<0.12` in custom env YAMLs.
+- **Funcscan "Missing required field(s): ID"**: bacass `nextflow.config` auto-loaded. Launch funcscan from outside the bacass project dir.
+- **Funcscan `GECCO_RUN` "mv: are the same file"**: `ext.prefix = { "${meta.id}_gecco" }` in `conf/funcscan_overrides.config` (already applied).
+- **Funcscan `DEEPBGC_PIPELINE` mv double-suffix bug**: `ext.prefix = "deepbgc"` (static) in `conf/funcscan_overrides.config` (already applied).
+- **Funcscan `DEEPBGC_PIPELINE` NFS/infiniband read-bottlenecking**: deepbgc_db (2.8 GB Pfam) is staged as a symlink → all hmmscan reads go over NFS. Fix: `conf/funcscan_patches/deepbgc_pipeline_main.nf` rsyncs the db to `/tmp/josne/deepbgc_db/` before running and sets `DEEPBGC_DOWNLOADS_DIR=/tmp/josne/deepbgc_db`. rsync is idempotent — multiple jobs on the same node only copy once. Deployed by `submit_funcscan_distributed.sh`.
+- **Funcscan `RGI_CARDANNOTATION` "mkdir: File exists"**: use `card_database_raw` symlink, not `card_database_processed` dir (already in submit script).
+- **Funcscan `DEEPBGC_PIPELINE`/`DEEPARG_PREDICT` single-threaded/timeout**: `cpus=10,time=48h` / `cpus=8,time=4h` in `conf/funcscan_overrides.config` (already applied).
+- **Funcscan `DEEPARG_PREDICT` Theano JIT C-header failures**: persistent cache pre-warmed at `env-cff2.../theano_persistent_cache/` via `sitecustomize.py`. See MEMORY.md to re-warm.
+- **Funcscan `ANTISMASH_ANTISMASH` `blastp returned 127`**: LD_LIBRARY_PATH set in `env-3afb.../etc/conda/activate.d/ncbi_blast_lib.sh` (already applied).
+- **Funcscan `ANTISMASH_ANTISMASH` Jinja2 `FileNotFoundError`**: `html_renderer.py` patched to DictLoader (pre-loads all templates). See MEMORY.md to reapply if env rebuilt.
+- **Funcscan Python tools `can't open file`**: bash heredoc wrappers applied to all Python entry-point scripts. See MEMORY.md for pattern and env list.
+- **Lock file error after killed job**: `rm .nextflow/cache/*/db/LOCK && nextflow run ... -resume`
+- **Fairshare depleted**: kill all jobs, wait for priority recovery, resubmit with `-resume`
+- **Bakta `ERROR: Circos could not be executed!`**: patch circos shebang to absolute perl path in pre-built env. See MEMORY.md.
+- **`KMERFINDER_SUMMARY` `No module named 'yaml'`**: missing `conda` directive in `main.nf` — already fixed.
+- **NCBI `BadZipFile`**: `bin/download_reference.py` strips assembly-name suffixes from kmerfinder accessions — already fixed.
