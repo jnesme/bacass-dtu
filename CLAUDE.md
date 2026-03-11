@@ -36,19 +36,21 @@
 
 **Per-process overrides** (in `conf/modules.config`):
 
-| Process | CPUs | Memory | Time |
-|---|---|---|---|
-| `UNICYCLER` | 8 | 8→16 GB | 16→32h |
-| `BAKTA` | 8 | 16→32 GB | — |
-| `KRAKEN2` | 8 | 16→32 GB | 8h |
-| `FASTQC_RAW/TRIM` | 2 | 4→8 GB | — |
-| `FASTP` | 4 | 8→16 GB | — |
-| `BUSCO_BUSCO` | 4 | 8→16 GB | — |
-| `QUAST` | 2 | 4→8 GB | — |
-| `RACON` | 8 | 40 GB | 8h |
-| `MEDAKA` | 8 | 40 GB | 8h |
-| `LIFTOFF` | 8 | 40 GB | 8h |
-| `MINIASM` | 1 | 16 GB | 8h |
+| Process | CPUs | Memory | Time | scratch |
+|---|---|---|---|---|
+| `UNICYCLER` | 8 | 8→16 GB | 16→32h | ✓ |
+| `BAKTA` | 8 | 16→32 GB | — | ✓ |
+| `KRAKEN2` | 8 | 16→32 GB | 8h | — |
+| `FASTQC_RAW/TRIM` | 2 | 4→8 GB | — | — |
+| `FASTP` | 4 | 8→16 GB | — | ✓ |
+| `BUSCO_BUSCO` | 4 | 8→16 GB | — | ✓ |
+| `QUAST` | 2 | 4→8 GB | — | — |
+| `RACON` | 8 | 40 GB | 8h | — |
+| `MEDAKA` | 8 | 40 GB | 8h | — |
+| `LIFTOFF` | 8 | 40 GB | 8h | — |
+| `MINIASM` | 1 | 16 GB | 8h | — |
+
+FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load (HPC staff flagged I/O bottleneck with 200+ parallel jobs). UNICYCLER additionally sets `beforeScript = "rm -rf spades_assembly/ 2>/dev/null; true"` — see Troubleshooting below.
 
 **Error handling**: retries on exit codes 130-145, 104, 175. `maxRetries = 1`. Resources double on retry.
 
@@ -90,9 +92,11 @@ Screening: BGC (antiSMASH, DeepBGC, GECCO), AMP (ampir, amplify, macrel, hmmsear
 - `--arg_rgi_db` must point to `card_database_raw` symlink, NOT `card_database_processed` directly
 - `FUNCSCAN_WORK` must be the same dir for test and full run (enables `-resume`)
 - Two `-c` flags: `-c conf/lsf.config -c conf/funcscan_overrides.config`
-- `UNICYCLER`: `scratch = true` (SPAdes I/O intensive; uses `$TMPDIR` on local SSD)
+- `UNICYCLER`: `scratch = true` + `beforeScript` to clean stale SPAdes checkpoints (see Troubleshooting)
 
 **Samplesheet**: `./bacass_to_funcscan.sh <results_dir> <output.csv>` → 4-column CSV (sample, fasta, protein, gbk).
+
+**After re-running bacass** (e.g. following assembly correctness issues), use `bin/compare_assemblies_for_funcscan.sh` to generate a samplesheet that preserves the funcscan `-resume` cache for unchanged assemblies and only re-runs changed ones — avoiding a full funcscan re-run.
 
 ## Repository Layout
 
@@ -114,7 +118,7 @@ conf/
   funcscan_overrides.config     # GECCO/DeepBGC conda overrides + resource fixes
 modules/nf-core/                # DO NOT edit — use nf-core modules update/install
 modules/local/                  # 7 custom modules
-bin/                            # Python helpers + libnfs_retry.so (LD_PRELOAD)
+bin/                            # Python helpers + libnfs_retry.so (LD_PRELOAD) + compare_assemblies_for_funcscan.sh
 assets/databases/               # All databases (gitignored)
 .conda_envs/                    # Pre-built conda envs (gitignored)
 .nextflow_home/                 # NXF_HOME: pulled pipelines, plugins (gitignored)
@@ -187,6 +191,10 @@ withName: 'CANU' { scratch = true }
 ./bacass_to_funcscan.sh /path/to/results samplesheet.csv
 head -6 samplesheet.csv > samplesheet_test.csv   # 5-sample test first
 bsub < submit_funcscan_distributed.sh
+
+# After re-running bacass, avoid a full funcscan re-run by only submitting changed assemblies
+bin/compare_assemblies_for_funcscan.sh old_bacass_dir new_bacass_dir old_funcscan_sheet.csv updated_sheet.csv
+# Then update INPUT in submit_funcscan_distributed.sh and run with -resume
 ```
 
 ## Troubleshooting
@@ -206,6 +214,7 @@ bsub < submit_funcscan_distributed.sh
 - **Funcscan `ANTISMASH_ANTISMASH` `blastp returned 127`**: LD_LIBRARY_PATH set in `env-3afb.../etc/conda/activate.d/ncbi_blast_lib.sh` (already applied).
 - **Funcscan `ANTISMASH_ANTISMASH` Jinja2 `FileNotFoundError`**: `html_renderer.py` patched to DictLoader (pre-loads all templates). See MEMORY.md to reapply if env rebuilt.
 - **Funcscan Python tools `can't open file`**: bash heredoc wrappers applied to all Python entry-point scripts. See MEMORY.md for pattern and env list.
+- **Unicycler silently reusing wrong SPAdes assembly**: When `scratch = true` and a job is aborted mid-assembly (e.g. LSF walltime kill), the partial `spades_assembly/K27/` etc. checkpoint dirs remain in `/tmp/`. If a subsequent job coincidentally lands on the same node with the same random scratch path, Unicycler finds existing checkpoints and reuses them — producing a chimeric assembly with another sample's graph topology but correct read depths. Fixed by `beforeScript = "rm -rf spades_assembly/ 2>/dev/null; true"` in the UNICYCLER block of `modules.config`, which cleans stale checkpoints before each run. **Do not remove this.** If re-running bacass after this bug was triggered, use `bin/compare_assemblies_for_funcscan.sh` to avoid a full funcscan re-run.
 - **Lock file error after killed job**: `rm .nextflow/cache/*/db/LOCK && nextflow run ... -resume`
 - **Fairshare depleted**: kill all jobs, wait for priority recovery, resubmit with `-resume`
 - **Bakta `ERROR: Circos could not be executed!`**: patch circos shebang to absolute perl path in pre-built env. See MEMORY.md.
