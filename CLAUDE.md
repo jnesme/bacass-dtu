@@ -22,6 +22,7 @@
 | `BACASS_KRAKEN2DB` | `assets/databases/minikraken2_v2_8GB_201904.tgz` |
 | `BACASS_KMERFINDERDB` | `assets/databases/kmerfinder_20190108_stable_dirs/bacteria` |
 | `BACASS_BAKTADB` | `assets/databases/bakta_db` |
+| `BACASS_BUSCODB` | `assets/databases/busco_db` |
 
 ## Resource Configuration (`conf/base.config`)
 

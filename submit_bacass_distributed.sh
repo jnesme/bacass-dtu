@@ -78,6 +78,7 @@ nextflow run "${BACASS_DIR}" \
     --kmerfinderdb "${BACASS_KMERFINDERDB}" \
     --annotation_tool bakta \
     --baktadb "${BACASS_BAKTADB}" \
+    --busco_db_path "${BACASS_BUSCODB}" \
     -resume
 
 EXIT_CODE=$?

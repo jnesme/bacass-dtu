@@ -79,7 +79,8 @@ nextflow run "${BACASS_DIR}" \
     --kraken2db "${BACASS_KRAKEN2DB}" \
     --kmerfinderdb "${BACASS_KMERFINDERDB}" \
     --annotation_tool bakta \
-    --baktadb "${BACASS_BAKTADB}"
+    --baktadb "${BACASS_BAKTADB}" \
+    --busco_db_path "${BACASS_BUSCODB}"
 
 EXIT_CODE=$?
 

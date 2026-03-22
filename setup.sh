@@ -29,6 +29,7 @@ mkdir -p "${NXF_CONDA_CACHEDIR}"
 export BACASS_KRAKEN2DB="${BACASS_DIR}/assets/databases/minikraken2_v2_8GB_201904_UPDATE"
 export BACASS_KMERFINDERDB="${BACASS_DIR}/assets/databases/kmerfinder_20190108_stable_dirs/bacteria"
 export BACASS_BAKTADB="${BACASS_DIR}/assets/databases/bakta_db"
+export BACASS_BUSCODB="${BACASS_DIR}/assets/databases/busco_db"
 
 # --- LSF shadow config ---
 # Nextflow 25.x auto-detects LSB_JOB_MEMLIMIT=Y from the system lsf.conf and
@@ -72,6 +73,7 @@ echo " Work dir      : ${NXF_WORK}"
 echo " Kraken2 DB    : ${BACASS_KRAKEN2DB}"
 echo " Kmerfinder DB : ${BACASS_KMERFINDERDB}"
 echo " Bakta DB      : ${BACASS_BAKTADB}"
+echo " BUSCO DB      : ${BACASS_BUSCODB}"
 echo " Nextflow      : $(nextflow -version 2>&1 | grep 'version' | head -1)"
 echo " Conda         : $(conda --version 2>&1)"
 echo "============================================"
