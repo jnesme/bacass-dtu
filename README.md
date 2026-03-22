@@ -341,13 +341,13 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 
 | Process | CPUs | Memory | Reason |
 |---|---|---|---|
-| unicycler | 8 | 8 GB (→ 16 GB retry) | Observed peak 3.8 GB / ~6% CPU efficiency on 16 CPUs |
-| fastqc | 2 | 4 GB (→ 8 GB retry) | Single-threaded; process_medium (40 GB) massively over-provisioned |
+| unicycler | 2 | 4 GB (→ 8 GB retry) | SPAdes ~1 core avg, 3.3 GB peak observed (33 Vibrio samples) |
+| fastqc | 8 | 4 GB (→ 8 GB retry) | JVM spawns ~20 threads; 8 CPUs prevents CS explosion on LSF |
 | fastp | 4 | 8 GB (→ 16 GB retry) | Low memory tool; 4 CPUs covers worker + I/O threads |
-| kraken2 | 8 | 16 GB (→ 32 GB retry) | minikraken2 DB is ~8 GB; 16 GB gives 2× headroom |
+| kraken2 | 8 | 10 GB (→ 20 GB retry) | minikraken2 DB ~8 GB; finishes in <1 min |
 | quast | 2 | 4 GB (→ 8 GB retry) | Mostly single-threaded for bacterial genomes |
 | busco | 4 | 8 GB (→ 16 GB retry) | HMMER-based; memory-light, doesn't scale past ~4 CPUs |
-| bakta | 8 | 16 GB (→ 32 GB retry) | Full DB diamond alignment ~8 GB |
+| bakta | 6 | 20 GB (→ 40 GB retry) | ~4.6 cores avg, 13 GB peak observed; 72 GB DB read over InfiniBand |
 | racon | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
 | medaka | 8 | 40 GB | 8 CPUs sufficient for bacterial genomes |
 | liftoff | 8 | 40 GB | Annotation of small bacterial genomes, fast at 8 cores |
@@ -392,6 +392,9 @@ bsub < submit_funcscan_distributed.sh  # full run — resumes, skips the 5 compl
 bjobs -w
 tail -f bacass_head_*.out              # bacass progress
 tail -f funcscan_head_*.out            # funcscan progress (use this, not .nextflow.log — it goes to temp dir)
+
+# Analyze resource usage after a run
+bin/trace_summary.py /your/Bacass_results/pipeline_info/execution_trace_*.txt
 
 # Resume after interruption
 bsub < submit_bacass_distributed.sh    # just resubmit — skips completed steps
