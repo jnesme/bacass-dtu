@@ -39,9 +39,9 @@
 
 | Process | CPUs | Memory | Time | scratch | maxForks |
 |---|---|---|---|---|---|
-| `UNICYCLER` | 8 | 8→16 GB | 16→32h | ✓ | — |
-| `BAKTA` | 8 | 16→32 GB | — | ✓ | **8** |
-| `KRAKEN2` / `KRAKEN2_LONG` | 8 | 16→32 GB | 8h | ✓ | **15** |
+| `UNICYCLER` | 2 | 4→8 GB | 8→16h | ✓ | — |
+| `BAKTA` | 6 | 20→40 GB | — | ✓ | **8** |
+| `KRAKEN2` / `KRAKEN2_LONG` | 8 | 10→20 GB | 1h | ✓ | **15** |
 | `KMERFINDER` | **1** | **8→16 GB** | — | — | **15** |
 | `FASTQC_RAW/TRIM` | **8** | 4→8 GB | — | — | **20** |
 | `FASTP` | 4 | 8→16 GB | — | ✓ | **30** |
