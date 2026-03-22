@@ -37,7 +37,7 @@ process DEEPBGC_PIPELINE {
     # on this node, subsequent jobs complete in seconds (only changed files transferred).
     mkdir -p /tmp/josne
     chmod 0700 /tmp/josne
-    rsync -a ${db}/ /tmp/josne/deepbgc_db/
+    rsync -aL ${db}/ /tmp/josne/deepbgc_db/
     export DEEPBGC_DOWNLOADS_DIR=/tmp/josne/deepbgc_db
 
     deepbgc \\

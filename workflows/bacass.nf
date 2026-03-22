@@ -22,7 +22,7 @@ include { FASTQC                                } from '../modules/nf-core/fastq
 include { CAT_FASTQ as CAT_FASTQ_SHORT          } from '../modules/nf-core/cat/fastq'
 include { CAT_FASTQ as CAT_FASTQ_LONG           } from '../modules/nf-core/cat/fastq'
 include { PORECHOP_PORECHOP                     } from '../modules/nf-core/porechop/porechop'
-include { UNICYCLER                             } from '../modules/nf-core/unicycler'
+include { UNICYCLER                             } from '../modules/local/unicycler'
 include { CANU                                  } from '../modules/nf-core/canu'
 include { MINIMAP2_ALIGN                        } from '../modules/nf-core/minimap2/align'
 include { MINIMAP2_ALIGN as MINIMAP2_CONSENSUS  } from '../modules/nf-core/minimap2/align'
