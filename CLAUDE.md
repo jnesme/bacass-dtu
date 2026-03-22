@@ -36,21 +36,28 @@
 
 **Per-process overrides** (in `conf/modules.config`):
 
-| Process | CPUs | Memory | Time | scratch |
-|---|---|---|---|---|
-| `UNICYCLER` | 8 | 8→16 GB | 16→32h | ✓ |
-| `BAKTA` | 8 | 16→32 GB | — | ✓ |
-| `KRAKEN2` | 8 | 16→32 GB | 8h | — |
-| `FASTQC_RAW/TRIM` | 2 | 4→8 GB | — | — |
-| `FASTP` | 4 | 8→16 GB | — | ✓ |
-| `BUSCO_BUSCO` | 4 | 8→16 GB | — | ✓ |
-| `QUAST` | 2 | 4→8 GB | — | — |
-| `RACON` | 8 | 40 GB | 8h | — |
-| `MEDAKA` | 8 | 40 GB | 8h | — |
-| `LIFTOFF` | 8 | 40 GB | 8h | — |
-| `MINIASM` | 1 | 16 GB | 8h | — |
+| Process | CPUs | Memory | Time | scratch | maxForks |
+|---|---|---|---|---|---|
+| `UNICYCLER` | 8 | 8→16 GB | 16→32h | ✓ | — |
+| `BAKTA` | 8 | 16→32 GB | — | ✓ | **8** |
+| `KRAKEN2` / `KRAKEN2_LONG` | 8 | 16→32 GB | 8h | ✓ | **15** |
+| `KMERFINDER` | **1** | **8→16 GB** | — | — | **15** |
+| `FASTQC_RAW/TRIM` | **8** | 4→8 GB | — | — | **20** |
+| `FASTP` | 4 | 8→16 GB | — | ✓ | **30** |
+| `BUSCO_BUSCO` | 4 | 8→16 GB | — | ✓ | **15** |
+| `QUAST` | 2 | 4→8 GB | — | — | — |
+| `RACON` | 8 | 40 GB | 8h | — | — |
+| `MEDAKA` | 8 | 40 GB | 8h | — | — |
+| `LIFTOFF` | 8 | 40 GB | 8h | — | — |
+| `MINIASM` | 1 | 16 GB | 8h | — | — |
 
-FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load (HPC staff flagged I/O bottleneck with 200+ parallel jobs). UNICYCLER additionally sets `beforeScript = "rm -rf spades_assembly/ 2>/dev/null; true"` — see Troubleshooting below.
+FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load. UNICYCLER uses `scratch = true` and cleans stale SPAdes checkpoints via the first line of its script block in `modules/local/unicycler/main.nf` — see Troubleshooting below.
+
+**FastQC CPU/maxForks rationale**: FastQC is Java — each JVM spawns ~20 OS threads regardless of declared CPUs. At `cpus=2`, LSF packs 10 FastQC jobs/node → 200 threads on 20 cores → 1.8M context-switches/s (HPC admin killed a 218-sample run, Mar 2026). Fix: `cpus=8` tells LSF the true cost (2 jobs/node → 40 threads); `maxForks=20` is belt-and-suspenders. **Note**: with the LSF executor, `maxForks` defaults to effectively unlimited (the head job has 1 CPU; `maxForks` default = CPUs−1 applies to local executor only). Must be set explicitly for any tool where declared CPUs ≠ actual thread footprint.
+
+**BUSCO maxForks rationale**: BUSCO spawns one `augustus` subprocess per BUSCO gene (~100–500 for bacteria). Short-lived fork/exec/wait cycles generate CS bursts; `maxForks=15` caps concurrent jobs (15×4=60 slots, leaves 224 for assembly).
+
+**InfiniBand/BeeGFS I/O maxForks rationale**: `scratch = true` only copies regular files to /tmp — directory inputs (database paths) are always symlinked and read over InfiniBand. FASTP `maxForks=30`: caps concurrent FASTQ staging (30×7.5 GB=225 GB). KRAKEN2 `maxForks=15`: caps concurrent 7.5 GB DB reads (15×8=120 slots). BAKTA `maxForks=8`: 72 GB DB too large to rsync; 8×8=64 slots. KMERFINDER `maxForks=15`: 17 GB DB, no scratch (15×17 GB=255 GB concurrent); `cpus=1` because kmerfinder.py is single-threaded Python.
 
 **Error handling**: retries on exit codes 130-145, 104, 175. `maxRetries = 1`. Resources double on retry.
 
@@ -60,7 +67,7 @@ FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load (HPC staf
 Local executor. 20 cores, 120 GB (6 GB/core), 72h wall time, `hpc` queue.
 
 ### Distributed (`submit_bacass_distributed.sh`)
-Head process: 1 core / 4 GB / 72h. Per-task via `conf/lsf.config`. Max 150 concurrent jobs. `pollInterval = '2 min'`.
+Head process: 1 core / 4 GB / 72h. Per-task via `conf/lsf.config`. Max 80 concurrent jobs (`queueSize`). `pollInterval = '2 min'`.
 
 ### Critical: LSF Memory Fix (NF 25.10.4)
 
@@ -92,7 +99,7 @@ Screening: BGC (antiSMASH, DeepBGC, GECCO), AMP (ampir, amplify, macrel, hmmsear
 - `--arg_rgi_db` must point to `card_database_raw` symlink, NOT `card_database_processed` directly
 - `FUNCSCAN_WORK` must be the same dir for test and full run (enables `-resume`)
 - Two `-c` flags: `-c conf/lsf.config -c conf/funcscan_overrides.config`
-- `UNICYCLER`: `scratch = true` + `beforeScript` to clean stale SPAdes checkpoints (see Troubleshooting)
+- `UNICYCLER`: `scratch = true` + stale SPAdes checkpoint cleanup in `modules/local/unicycler/main.nf` (see Troubleshooting)
 
 **Samplesheet**: `./bacass_to_funcscan.sh <results_dir> <output.csv>` → 4-column CSV (sample, fasta, protein, gbk).
 
@@ -214,7 +221,9 @@ bin/compare_assemblies_for_funcscan.sh old_bacass_dir new_bacass_dir old_funcsca
 - **Funcscan `ANTISMASH_ANTISMASH` `blastp returned 127`**: LD_LIBRARY_PATH set in `env-3afb.../etc/conda/activate.d/ncbi_blast_lib.sh` (already applied).
 - **Funcscan `ANTISMASH_ANTISMASH` Jinja2 `FileNotFoundError`**: `html_renderer.py` patched to DictLoader (pre-loads all templates). See MEMORY.md to reapply if env rebuilt.
 - **Funcscan Python tools `can't open file`**: bash heredoc wrappers applied to all Python entry-point scripts. See MEMORY.md for pattern and env list.
-- **Unicycler silently reusing wrong SPAdes assembly**: When `scratch = true` and a job is aborted mid-assembly (e.g. LSF walltime kill), the partial `spades_assembly/K27/` etc. checkpoint dirs remain in `/tmp/`. If a subsequent job coincidentally lands on the same node with the same random scratch path, Unicycler finds existing checkpoints and reuses them — producing a chimeric assembly with another sample's graph topology but correct read depths. Fixed by `beforeScript = "rm -rf spades_assembly/ 2>/dev/null; true"` in the UNICYCLER block of `modules.config`, which cleans stale checkpoints before each run. **Do not remove this.** If re-running bacass after this bug was triggered, use `bin/compare_assemblies_for_funcscan.sh` to avoid a full funcscan re-run.
+- **Unicycler silently reusing wrong SPAdes assembly**: When `scratch = true` and a job is aborted mid-assembly (e.g. LSF walltime kill), the partial `spades_assembly/K27/` etc. checkpoint dirs remain in `/tmp/`. If a subsequent job coincidentally lands on the same node with the same random scratch path, Unicycler finds existing checkpoints and reuses them — producing a chimeric assembly with another sample's graph topology but correct read depths. Fixed by `rm -rf spades_assembly/ 2>/dev/null || true` as the **first line of the script block** in `modules/local/unicycler/main.nf`. Note: `beforeScript` cannot fix this — it fires before Nextflow's `cd $NXF_SCRATCH`, so it would target the NFS work dir instead of the scratch dir. The local module is used instead of the nf-core one (include redirected in `workflows/bacass.nf`). If re-running bacass after this bug was triggered, use `bin/compare_assemblies_for_funcscan.sh` to avoid a full funcscan re-run.
+- **HPC admin kills job / 1.8M context-switches/s**: Java tools (FastQC) declare few CPUs but spawn many JVM threads. LSF packs jobs by declared CPUs → many JVMs/node → CS explosion. Fix: raise declared CPUs to match actual thread footprint + `maxForks` cap. See resource table above. With LSF executor, `maxForks` must be set explicitly — it does NOT auto-limit based on node CPUs (that only applies to local executor).
+- **Head job killed by admin, pipeline incomplete**: check `bhist -l <jobid>` for `TERM_ADMIN`. Resubmit with `-resume` — completed tasks (FASTP etc.) are cached, pipeline continues from where it was killed.
 - **Lock file error after killed job**: `rm .nextflow/cache/*/db/LOCK && nextflow run ... -resume`
 - **Fairshare depleted**: kill all jobs, wait for priority recovery, resubmit with `-resume`
 - **Bakta `ERROR: Circos could not be executed!`**: patch circos shebang to absolute perl path in pre-built env. See MEMORY.md.
