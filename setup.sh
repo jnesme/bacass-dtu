@@ -44,14 +44,6 @@ sed 's/LSB_JOB_MEMLIMIT=Y/LSB_JOB_MEMLIMIT=N/' /lsf/conf/lsf.conf \
     > "${BACASS_DIR}/conf/lsf_shadow/lsf.conf"
 export LSF_ENVDIR="${BACASS_DIR}/conf/lsf_shadow"
 
-# --- LD_PRELOAD: BeeGFS open() retry library ---
-# Intercepts open()/openat()/fopen() and retries on spurious ENOENT (stat-based
-# discrimination: only retries when stat() succeeds but open() fails).
-# Must be exported HERE so LSF inherits it and bash itself loads the library —
-# this protects bash source builtins (e.g. conda.sh activation) which the
-# beforeScript LD_PRELOAD cannot protect (beforeScript runs after bash starts).
-export LD_PRELOAD="${BACASS_DIR}/bin/libnfs_retry.so"
-
 # --- Nextflow settings ---
 # Keep Nextflow home (pulled pipelines, plugins) inside the project
 export NXF_HOME="${BACASS_DIR}/.nextflow_home"

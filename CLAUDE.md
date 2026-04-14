@@ -70,6 +70,13 @@ Local executor. 20 cores, 120 GB (6 GB/core), 72h wall time, `hpc` queue.
 ### Distributed (`submit_bacass_distributed.sh`)
 Head process: 1 core / 4 GB / 72h. Per-task via `conf/lsf.config`. Max 80 concurrent jobs (`queueSize`). `pollInterval = '2 min'`.
 
+### hpcspecial queue (project-local, when banned from `hpc`)
+Project-specific scripts in `/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/`:
+- `submit_bacass_hpcspecial.sh` — head job on `hpcspecial`
+- `lsf_hpcspecial.config` — per-task jobs on `hpcspecial`; `queueSize=10`, `pollInterval=5 min` (single node, testing)
+
+**Do not commit these to the codebase** — they are project-local overrides. `hpcspecial` is a single node so distributed mode is for LSF config testing only; use `submit_bacass.sh` (local executor) for real runs on a single node.
+
 ### Critical: LSF Memory Fix (NF 25.10.4)
 
 NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs. Two fixes applied:
@@ -126,7 +133,7 @@ conf/
   funcscan_overrides.config     # GECCO/DeepBGC conda overrides + resource fixes
 modules/nf-core/                # DO NOT edit — use nf-core modules update/install
 modules/local/                  # 7 custom modules
-bin/                            # Python helpers + libnfs_retry.so (LD_PRELOAD) + compare_assemblies_for_funcscan.sh
+bin/                            # Python helpers + compare_assemblies_for_funcscan.sh
 assets/databases/               # All databases (gitignored)
 .conda_envs/                    # Pre-built conda envs (gitignored)
 .nextflow_home/                 # NXF_HOME: pulled pipelines, plugins (gitignored)
@@ -172,6 +179,12 @@ process TOOLNAME {
 - `--unicycler_args`: e.g., `"--mode bold"` for 2-3× faster assembly
 - `--skip_*`: `--skip_kraken2`, `--skip_busco`, `--skip_annotation`, etc.
 
+## Nextflow Reporting
+
+`timeline`, `report`, and `trace` are all **disabled** in `nextflow.config` (Mar 2026, HPC admin request). When enabled, Nextflow injects `nxf_mem_watch()`/`nxf_trace_linux()` etc. into every `.command.run` script — each job runs a background polling loop writing `.command.trace` to BeeGFS every second. With 80 concurrent jobs this creates significant BeeGFS write overhead. LSF `bstat` and job-finished emails provide sufficient resource info.
+
+`dag` remains enabled (static graph, no per-task overhead). Same setting applied in `conf/funcscan_overrides.config`.
+
 ## Testing & Linting
 
 ```bash
@@ -210,7 +223,7 @@ bin/compare_assemblies_for_funcscan.sh old_bacass_dir new_bacass_dir old_funcsca
 - **Jobs PEND "Resource (mem) limit"**: LSF memory fix not active — check shadow lsf.conf and `perTaskReserve = true` in `conf/lsf.config`. Verify: `bjobs -l <id>` shows single `-R` with divided rusage.
 - **"conda: command not found" / "Run conda init first"**: ensure `#!/bin/bash` and `conda.sh` sourced in `setup.sh`
 - **`/bin/activate: No such file or directory`**: `conda info --json` returning empty (NFS failure). Fix: `/work3/josne/miniconda3/bin/conda` is already patched to short-circuit `conda info --json`. See MEMORY.md.
-- **Spurious ENOENT on BeeGFS files**: `bin/libnfs_retry.so` LD_PRELOADed via `beforeScript` AND exported in `setup.sh` so bash itself loads the library (protects bash `source` builtins including conda activation). See MEMORY.md to rebuild.
+- **Spurious ENOENT on BeeGFS files**: previously mitigated via `bin/libnfs_retry.so` (LD_PRELOAD), but removed (Mar 2026) — the extra `stat()` per ENOENT was hammering BeeGFS metadata during job-spawn bursts. The `conda info --json` short-circuit in `/work3/josne/miniconda3/bin/conda` is the primary remaining fix. Source kept at `bin/libnfs_retry.c` if needed again.
 - **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta/GECCO/DeepBGC): pyhmmer >=0.12 incompatibility. Fixed via `pyhmmer<0.12` in custom env YAMLs.
 - **Funcscan "Missing required field(s): ID"**: bacass `nextflow.config` auto-loaded. Launch funcscan from outside the bacass project dir.
 - **Funcscan `GECCO_RUN` "mv: are the same file"**: `ext.prefix = { "${meta.id}_gecco" }` in `conf/funcscan_overrides.config` (already applied).
