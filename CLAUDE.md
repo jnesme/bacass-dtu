@@ -39,7 +39,7 @@
 
 | Process | CPUs | Memory | Time | scratch | maxForks |
 |---|---|---|---|---|---|
-| `UNICYCLER` | 2 | 4→8 GB | 8→16h | ✓ | — |
+| `UNICYCLER` | 2 | 4→8 GB | 8→16h | ✓ | **15** |
 | `BAKTA` | 6 | 20→40 GB | — | ✓ | **8** |
 | `KRAKEN2` / `KRAKEN2_LONG` | 8 | 10→20 GB | 1h | ✓ | **15** |
 | `KMERFINDER` | **1** | **8→16 GB** | — | — | **15** |
@@ -50,7 +50,7 @@
 | `RACON` | 8 | 40 GB | 8h | — | — |
 | `MEDAKA` | 8 | 40 GB | 8h | — | — |
 | `LIFTOFF` | 8 | 40 GB | 8h | — | — |
-| `MINIASM` | 1 | 16 GB | 8h | — | — |
+| `MINIASM` | 8 | 40 GB | 8h | — | 10 |
 
 FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load. UNICYCLER uses `scratch = true` and cleans stale SPAdes checkpoints via the first line of its script block in `modules/local/unicycler/main.nf` — see Troubleshooting below.
 
@@ -223,7 +223,9 @@ bin/compare_assemblies_for_funcscan.sh old_bacass_dir new_bacass_dir old_funcsca
 - **Jobs PEND "Resource (mem) limit"**: LSF memory fix not active — check shadow lsf.conf and `perTaskReserve = true` in `conf/lsf.config`. Verify: `bjobs -l <id>` shows single `-R` with divided rusage.
 - **"conda: command not found" / "Run conda init first"**: ensure `#!/bin/bash` and `conda.sh` sourced in `setup.sh`
 - **`/bin/activate: No such file or directory`**: `conda info --json` returning empty (NFS failure). Fix: `/work3/josne/miniconda3/bin/conda` is already patched to short-circuit `conda info --json`. See MEMORY.md.
-- **Spurious ENOENT on BeeGFS files**: previously mitigated via `bin/libnfs_retry.so` (LD_PRELOAD), but removed (Mar 2026) — the extra `stat()` per ENOENT was hammering BeeGFS metadata during job-spawn bursts. The `conda info --json` short-circuit in `/work3/josne/miniconda3/bin/conda` is the primary remaining fix. Source kept at `bin/libnfs_retry.c` if needed again.
+- **Spurious ENOENT on BeeGFS files**: previously mitigated via `bin/libnfs_retry.so` (LD_PRELOAD); removed entirely (May 2026) — the extra `stat()` per ENOENT was hammering BeeGFS metadata. Two durable replacements now live in tracked files:
+  - **`conda info --json` short-circuit**: bash function defined in `setup.sh` (search for "Short-circuit"). Returns hardcoded JSON instead of letting Nextflow invoke conda's Python CLI. Survives `conda update` because it's not in conda's install tree. Other `conda` invocations fall through to the real binary via `command conda`.
+  - **UNCHECKED_HASH bytecode**: `bin/recompile_pyc.sh` recompiles all conda env site-packages so Python's `.pyc` validation skips the source-file `stat()`. `setup.sh` has a self-heal hook that triggers a recompile whenever a conda env lacks the `.unchecked_hash_applied` marker (run-once per env, ~5 min on first invocation, negligible thereafter). `--force` re-runs everything. Skips Python 2 envs and non-Python tool envs.
 - **`AttributeError: 'str' object has no attribute 'decode'`** (Bakta/GECCO/DeepBGC): pyhmmer >=0.12 incompatibility. Fixed via `pyhmmer<0.12` in custom env YAMLs.
 - **Funcscan "Missing required field(s): ID"**: bacass `nextflow.config` auto-loaded. Launch funcscan from outside the bacass project dir.
 - **Funcscan `GECCO_RUN` "mv: are the same file"**: `ext.prefix = { "${meta.id}_gecco" }` in `conf/funcscan_overrides.config` (already applied).
