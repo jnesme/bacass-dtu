@@ -26,3 +26,6 @@ funcscan_head_*.err
 funcscan_samplesheet.csv
 conf/lsf_shadow/
 .unchecked_hash_applied
+MisuseReport.txt
+summary_MisuseReport.txt
+hpc_admin_email_draft.txt
