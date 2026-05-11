@@ -25,8 +25,12 @@ for QUEUE in "${QUEUES[@]}"; do
         continue
     fi
 
-    sleep 2
-    REASON=$(bjobs -noheader -p "$JOBID" 2>/dev/null | head -1)
+    # Poll until LSF has assigned a real PEND reason (not just "waiting for scheduling")
+    for i in $(seq 1 15); do
+        sleep 2
+        REASON=$(bjobs -p "$JOBID" 2>/dev/null)
+        echo "$REASON" | grep -q "New job is waiting for scheduling" || break
+    done
     bkill "$JOBID" > /dev/null 2>&1
 
     echo "$QUEUE (job $JOBID): $REASON"
