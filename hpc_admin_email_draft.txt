@@ -1,0 +1,37 @@
+Subject: Following up on the Vibrio Galathea3 cluster issues — request to resume access
+
+Dear Sebastian,
+
+I wanted to circle back properly after the issues my pipeline caused on LSF10 last month. First,thank you for the patience, and for stopping me before things got worse. In retrospect there were several choices in my configuration that any seasoned HPC user would have flagged immediately, and I'm grateful you took the time to explain what was happening so I could investigate properly.
+
+When I started the 218-sample Vibrio Galathea3 run I was focused on getting the biology out the other end, and underestimated how the pipeline as configured would interact with shared infrastructure. What you saw: the FastQC context-switch storms, the LD_PRELOAD library hammering BeeGFS metadata, the Nextflow tracing writes, and a DeepBGC step that read a 2.8 GB Pfam database from NFS for every concurrent job was the cumulative result of decisions that each looked locally reasonable but added up to something genuinely harmful to the other users and their jobs. I want to own that, not explain it away.
+
+I've spent the past few weeks doing a careful post-mortem and reconfiguring the pipeline with cluster fairness as a first-class concern rather than an afterthought. I have added a lengthy document about the implemented fixes.
+
+  * MisuseReport.txt — full technical breakdown of each incident, root cause, and fix
+
+The headline changes:
+
+  * Every per-sample module in both bacass (assembly) and funcscan (annotation) now has an explicit maxForks cap. No single pipeline run can flood the queue with one tool type any more.
+  * queueSize lowered from 150 to 50.
+  * The LD_PRELOAD library is gone. It was the wrong tool for the job. The underlying NFS read issues are now addressed with a pre-compiled .pyc bytecode, a patched conda activation that avoids Python imports entirely.
+  * Nextflow's per-job trace/timeline/report logging is disabled, no more one-second BeeGFS writes per running job.
+  * The DTU-specific LSF memory reservation quirk (LSB_JOB_MEMLIMIT=Y) is now correctly handled via a shadow lsf.conf plus perTaskReserve=true.
+  * DeepBGC's 2.8 GB Pfam database is rsynced once per node to /tmp rather than being read from NFS by every concurrent job. The rsync is idempotent and capped at 10 concurrent first-time copies.
+  * The Unicycler/SPAdes scratch-checkpoint bug that originally triggered the 218-sample rerun is fixed.
+  * CPU allocations are now calibrated to observed resource use rather than nf-core defaults; FastQC, BUSCO and others declare what they actually need so LSF can pack jobs sensibly.
+  * Assembly jobs (Unicycler/SPAdes) now use -R "order[-slots]" to spread across nodes rather than packing onto the same one
+
+The 218-sample run did ultimately complete and the data is clean, but I'm aware that's not really the point. The cluster is shared infrastructure and how I use it matters as much as what I get out of it.
+
+All of these decisions live in the configuration files with explanatory comments so the lessons survive in the codebase rather than just in my head. Any colleague who picks up this pipeline fork inherits the corrected behaviour automatically.
+
+I also saw your note about /tmp filling on n-62-21-19, apologies for that, it is the default beavior of a mmseqs database download that I will run manually instead. Thank you for adding one more SSD and noted, I'll use /localssd going forward and extract directly there.
+
+If it would help, I'd be happy to do a small supervised test run before resuming any larger work, or to walk through any of the fixes with you in person. I'd genuinely value the feedback. And if there are conventions or safeguards used elsewhere on the cluster that I should adopt, please let me know. I'd rather hear them now than discover them the hard way again.
+
+Thank you again for the time you've spent on this. I know it's not your job to debug a user's pipeline, and I appreciate that you did anyway.
+
+Best regards,
+Joseph Nesme
+DTU Bioengineering

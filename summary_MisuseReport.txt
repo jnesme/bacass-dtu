@@ -1,0 +1,80 @@
+ HPC Usage Incident Summary — bacass / funcscan, DTU HPC (Mar–Apr 2026)
+======================================================================
+
+This note is a brief account of the cluster issues encountered during a 218-sample bacterial genome
+assembly run (Vibrio Galathea3), what caused them, and what has been done to make sure they don't
+happen again.
+
+The analysis job itself has now completed successfully. All 218 assemblies are clean, reproducible,
+and fully annotated. We appreciate the patience of the HPC team throughout.
+
+
+What went wrong
+---------------
+Several configuration mistakes compounded each other:
+
+1. FastQC was declared as a 2-CPU job but its JVM silently spawns ~20 threads per instance. With
+   150 concurrent jobs, LSF packed up to 10 FastQC instances per node, pushing context-switches
+   to ~1.8 million/sec and making nodes unresponsive. This was the most visible incident.
+
+2. An open-file retry library (LD_PRELOAD) was introduced to handle intermittent BeeGFS read
+   failures. It worked correctly in isolation but at scale it fired a stat() system call on every
+   single Python module-search probe — hundreds per job startup — generating a burst of thousands
+   of metadata requests per second on the BeeGFS servers and affecting other users.
+
+3. Nextflow's built-in trace/timeline/report logging was enabled by default, causing every running
+   job to write a .command.trace file to BeeGFS every second (80+ writes/sec of pure overhead).
+
+4. LSF memory reservations were miscalculated due to a DTU-HPC-specific configuration quirk
+   (LSB_JOB_MEMLIMIT), causing jobs to either PEND indefinitely or over-reserve slots.
+
+5. scratch = true on database-heavy processes (FASTP, KRAKEN2, BAKTA) caused unnecessary rsync
+   bursts at job startup — the databases were too large or directory-based and were never actually
+   copied, making the rsync pure overhead.
+
+6. SPAdes (the assembler inside Unicycler) spawns many short-lived subprocesses per assembly stage,
+   generating context-switch bursts when multiple jobs ran on the same node. A related bug also
+   allowed stale SPAdes checkpoints in /tmp to be silently reused across jobs, which caused a
+   precautionary 218-sample rerun that added unnecessary cluster load.
+
+7. In the funcscan part of the pipeline, the DeepBGC tool reads a 2.8 GB Pfam database via NFS
+   throughout each job. Because Nextflow symlinks directory inputs rather than copying them,
+   scratch = true gave no protection — all 218 jobs read directly from BeeGFS simultaneously.
+   Combined with a misconfigured 1-CPU allocation (causing single-threaded hmmscan, 3–5h per
+   contig, and cascading retries), this created sustained InfiniBand read pressure affecting the
+   whole cluster.
+
+
+What has been fixed
+-------------------
+All of the above are resolved in the current pipeline configuration:
+
+- FastQC, BUSCO, and Unicycler now declare realistic CPU counts (8, 4, and 2 respectively) so LSF
+  places fewer jobs per node.
+- The LD_PRELOAD library has been removed. The underlying BeeGFS ENOENT problem is addressed
+  through targeted fixes (pre-compiled Python bytecaches, a patched conda activation script).
+- Nextflow trace/timeline/report are disabled. DAG output is retained as it has no per-task cost.
+- LSF memory reservation is now correct (shadow lsf.conf + perTaskReserve = true).
+- scratch = true has been removed from all database-heavy processes; it is only kept where it
+  genuinely helps (SPAdes k-mer intermediates, BUSCO augustus outputs).
+- Stale SPAdes checkpoints are now cleared at the start of every Unicycler job.
+- DeepBGC now rsyncs its Pfam database to node-local /tmp before running, so hmmscan reads from
+  disk rather than NFS. Concurrent rsyncs are capped at 10 (maxForks=10). The CPU allocation was
+  corrected from 1 to 5, eliminating the single-threaded bottleneck and the retry cascade it caused.
+
+Most importantly: every per-sample module in both bacass and funcscan now has an explicit maxForks
+limit. This caps how many concurrent jobs a single user can submit for each tool, regardless of
+queue size — preventing any one pipeline run from flooding the cluster with a particular job type.
+Combined with queueSize reduced from 150 → 50 and the per-tool concurrency caps, peak slot usage
+from a single pipeline run is now bounded and predictable.
+
+
+Going forward
+-------------
+The pipeline (nf-core/bacass, DTU Bioengineering fork) is now configured conservatively for the
+DTU HPC environment. The lessons learned from this run are documented in full in MisuseReport.txt
+and encoded directly into the configuration files with explanatory comments, so future users
+inherit the correct settings without needing to rediscover these issues.
+
+We are committed to running responsibly on shared infrastructure and grateful for the HPC team's
+intervention that helped us identify and fix these problems.
