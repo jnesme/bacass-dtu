@@ -416,7 +416,7 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 | Process | CPUs | Memory | Reason |
 |---|---|---|---|
 | unicycler | 2 | 4 GB (→ 8 GB retry) | SPAdes ~1 core avg, 3.3 GB peak observed (33 Vibrio samples, ~4 Mb genomes). Valid for small bacterial genomes (≤5 Mb, clean short reads). For larger/more complex genomes (e.g. Streptomyces ~8 Mb), raise to 4–8 CPUs and adjust maxForks so that cpus × maxForks ≤ 20 slots. |
-| fastqc | 8 | 4 GB (→ 8 GB retry) | JVM spawns ~20 threads; 8 CPUs prevents CS explosion on LSF |
+| fastqc | 2 | 4 GB (→ 8 GB retry) | `-t 2` processes R1 and R2 in parallel (honest, efficient). `maxForks=10` + `order[-slots]` caps concurrent JVMs and spreads across nodes to prevent CS storms. |
 | fastp | 4 | 8 GB (→ 16 GB retry) | Low memory tool; 4 CPUs covers worker + I/O threads |
 | kraken2 | 8 | 10 GB (→ 20 GB retry) | minikraken2 DB ~8 GB; finishes in <1 min |
 | quast | 2 | 4 GB (→ 8 GB retry) | Mostly single-threaded for bacterial genomes |
