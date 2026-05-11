@@ -32,12 +32,18 @@ process DEEPBGC_PIPELINE {
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
     """
-    # Copy DeepBGC database to node-local /tmp to avoid repeated NFS reads during
-    # hmmscan. rsync is idempotent: if another job already populated /tmp/josne/deepbgc_db
-    # on this node, subsequent jobs complete in seconds (only changed files transferred).
-    mkdir -p /tmp/josne
+    # Copy DeepBGC database to node-local /tmp exactly once per node, even when
+    # multiple jobs run concurrently. flock serializes access: the first job acquires
+    # the lock and rsyncs; subsequent jobs wait, then see the marker and skip.
+    mkdir -p /tmp/josne/deepbgc_db
     chmod 0700 /tmp/josne
-    rsync -aL ${db}/ /tmp/josne/deepbgc_db/
+    (
+        flock -x 200
+        if [ ! -f /tmp/josne/deepbgc_db/.transferred ]; then
+            rsync -aL ${db}/ /tmp/josne/deepbgc_db/
+            touch /tmp/josne/deepbgc_db/.transferred
+        fi
+    ) 200>/tmp/josne/.deepbgc_db.lock
     export DEEPBGC_DOWNLOADS_DIR=/tmp/josne/deepbgc_db
 
     deepbgc \\
