@@ -29,3 +29,5 @@ conf/lsf_shadow/
 MisuseReport.txt
 summary_MisuseReport.txt
 hpc_admin_email*.txt
+probe_*.out
+probe_*.err
