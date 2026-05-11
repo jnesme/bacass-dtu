@@ -43,7 +43,7 @@
 | `BAKTA` | 6 | 20→40 GB | — | ✓ | **8** |
 | `KRAKEN2` / `KRAKEN2_LONG` | 8 | 10→20 GB | 1h | ✓ | **15** |
 | `KMERFINDER` | **1** | **8→16 GB** | — | — | **15** |
-| `FASTQC_RAW/TRIM` | **8** | 4→8 GB | — | — | **20** |
+| `FASTQC_RAW/TRIM` | **1** | 4→8 GB | — | — | **10** |
 | `FASTP` | 4 | 8→16 GB | — | ✓ | **30** |
 | `BUSCO_BUSCO` | 4 | 8→16 GB | — | ✓ | **15** |
 | `QUAST` | 2 | 4→8 GB | — | — | — |
@@ -54,7 +54,7 @@
 
 FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load. UNICYCLER uses `scratch = true` and cleans stale SPAdes checkpoints via the first line of its script block in `modules/local/unicycler/main.nf` — see Troubleshooting below.
 
-**FastQC CPU/maxForks rationale**: FastQC is Java — each JVM spawns ~20 OS threads regardless of declared CPUs. At `cpus=2`, LSF packs 10 FastQC jobs/node → 200 threads on 20 cores → 1.8M context-switches/s (HPC admin killed a 218-sample run, Mar 2026). Fix: `cpus=8` tells LSF the true cost (2 jobs/node → 40 threads); `maxForks=20` is belt-and-suspenders. **Note**: with the LSF executor, `maxForks` defaults to effectively unlimited (the head job has 1 CPU; `maxForks` default = CPUs−1 applies to local executor only). Must be set explicitly for any tool where declared CPUs ≠ actual thread footprint.
+**FastQC CPU/maxForks rationale**: FastQC is Java — each JVM spawns ~20 OS threads regardless of declared CPUs. `cpus=1` (honest declaration) + `maxForks=10` + `order[-slots]` caps total concurrent JVM instances at 10, spread across nodes. Worst case: 10 nodes × 20 threads = 200 threads total across the cluster — normal load. The original problem was 200 threads concentrated on one node (1.8M CS/s, Mar 2026), not 200 threads total. **Note**: with the LSF executor, `maxForks` defaults to effectively unlimited (the head job has 1 CPU; `maxForks` default = CPUs−1 applies to local executor only). Must be set explicitly for any tool where declared CPUs ≠ actual thread footprint.
 
 **BUSCO maxForks rationale**: BUSCO spawns one `augustus` subprocess per BUSCO gene (~100–500 for bacteria). Short-lived fork/exec/wait cycles generate CS bursts; `maxForks=15` caps concurrent jobs (15×4=60 slots, leaves 224 for assembly).
 
