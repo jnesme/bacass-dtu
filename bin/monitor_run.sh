@@ -11,15 +11,15 @@ while true; do
     echo "=== $(date) — queue: ${QUEUE} ==="
     echo ""
 
-    # Job summary
+    # Job summary — STAT is $6 in this LSF's bjobs -noheader format
     echo "--- Jobs ---"
     bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null \
-        | awk '{stat[$4]++} END {for (s in stat) printf "  %-8s %d\n", s, stat[s]}' \
+        | awk '{stat[$6]++} END {for (s in stat) printf "  %-8s %d\n", s, stat[s]}' \
         | sort
     echo ""
 
     # PEND reasons (if any jobs are pending)
-    PEND_JOBS=$(bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null | awk '$4=="PEND"{print $1}' | head -5)
+    PEND_JOBS=$(bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null | awk '$6=="PEND"{print $1}' | head -5)
     if [ -n "${PEND_JOBS}" ]; then
         echo "--- PEND reasons (first 5) ---"
         for JID in ${PEND_JOBS}; do
@@ -29,25 +29,20 @@ while true; do
         echo ""
     fi
 
-    # Spot-check one running job's resource string
-    RUN_JOB=$(bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null | awk '$4=="RUN"{print $1; exit}')
+    # Spot-check one running task job's resource string (skip head job)
+    RUN_JOB=$(bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null \
+        | awk '$6=="RUN" && $4!~/cass_head/{print $1; exit}')
     if [ -n "${RUN_JOB}" ]; then
-        echo "--- Resource check (job ${RUN_JOB}) ---"
+        echo "--- Resource check (task job ${RUN_JOB}) ---"
         bjobs -l "${RUN_JOB}" 2>/dev/null \
-            | grep -E "RESOURCE|rusage|order|LD_PRELOAD|nxf_trace|EXEC_HOST" \
+            | grep -E "rusage|LD_PRELOAD|nxf_trace|Started.*Host" \
             | sed 's/^/  /'
         echo ""
     fi
 
-    # Node load
-    echo "--- Node load (${QUEUE} node) ---"
-    EXEC_HOST=$(bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null | awk '$4=="RUN"{print $6; exit}')
-    if [ -n "${EXEC_HOST}" ] && [ "${EXEC_HOST}" != "-" ]; then
-        ssh -o ConnectTimeout=3 -o BatchMode=yes "${EXEC_HOST}" \
-            "uptime; echo 'procs:' \$(nproc)" 2>/dev/null | sed 's/^/  /'
-    else
-        echo "  (no running jobs yet)"
-    fi
+    # Node load via lsload (no ssh needed)
+    echo "--- Node load ---"
+    lsload n-62-21-19 2>/dev/null | sed 's/^/  /'
 
     echo ""
     echo "Refreshing every ${INTERVAL}s — Ctrl+C to stop"
