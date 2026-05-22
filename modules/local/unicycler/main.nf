@@ -35,6 +35,10 @@ process UNICYCLER {
         echo "INFO: no stale SPAdes checkpoint found (clean scratch dir)"
     fi
 
+    # Cap OpenMP thread pool to declared CPUs. Without this, SPAdes auto-detects
+    # the full node CPU count and spawns ~13 threads regardless of --threads.
+    export OMP_NUM_THREADS=${task.cpus}
+
     unicycler \\
         --threads $task.cpus \\
         $args \\
