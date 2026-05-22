@@ -11,11 +11,15 @@ while true; do
     echo "=== $(date) — queue: ${QUEUE} ==="
     echo ""
 
-    # Job summary — STAT is $6 in this LSF's bjobs -noheader format
+    # Job summary — STAT is $6, JOB_NAME is $4 in this LSF's bjobs -noheader format
     echo "--- Jobs ---"
     bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null \
         | awk '{stat[$6]++} END {for (s in stat) printf "  %-8s %d\n", s, stat[s]}' \
         | sort
+    echo ""
+    echo "--- Running jobs ---"
+    bjobs -noheader -u josne -q "${QUEUE}" 2>/dev/null \
+        | awk '$6=="RUN"{printf "  %-12s  %s\n", $1, $4}' | sort -k2
     echo ""
 
     # PEND reasons (if any jobs are pending)
