@@ -79,12 +79,13 @@ Project-specific scripts in `/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/`
 
 ### Critical: LSF Memory Fix (NF 25.10.4)
 
-NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs. Two fixes applied:
+NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs. Three fixes applied:
 
 1. **Shadow lsf.conf** (`setup.sh`): DTU HPC has `LSB_JOB_MEMLIMIT=Y` → NF disables `-M` division. Shadow with `LSB_JOB_MEMLIMIT=N`, export `LSF_ENVDIR` to shadow dir.
 2. **`perTaskReserve = true`** (`conf/lsf.config`): divides `rusage` by CPUs → single clean `-R "select[mem>=<total>] rusage[mem=<per-slot>]"`.
+3. **`clusterOptions` `-M`** (`conf/lsf.config`): adds explicit per-slot kill limit at 5% above rusage. With `LSB_JOB_MEMLIMIT=N`, `-M` is per-slot → total enforcement = declared × 1.05. Without this, `rusage` is advisory only and jobs exceeding their memory declaration are never killed (retry logic never fires).
 
-**Never set `perJobMemLimit = true`**. Verify: `bjobs -l <jobid>` → single `-R` string.
+**Never set `perJobMemLimit = true`** — generates conflicting `-R` strings without the shadow. Verify: `bjobs -l <jobid>` → single `-R` string, plus `-M` entry at `(declared_MB × 1.05 / cpus)` per slot.
 
 ## Annotation: Bakta
 
