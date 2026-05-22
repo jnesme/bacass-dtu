@@ -24,6 +24,10 @@ process UNICYCLER {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def short_reads = shortreads ? ( meta.single_end ? "-s $shortreads" : "-1 ${shortreads[0]} -2 ${shortreads[1]}" ) : ""
     def long_reads  = longreads ? "-l $longreads" : ""
+    def mem_gb = (int)(task.memory.toGiga())
+    // Override Unicycler's hardcoded -m 1024 default so SPAdes respects the LSF memory limit.
+    // Only inject if the user hasn't already specified -m anywhere in unicycler_args.
+    def spades_mem = args.contains('-m ') ? '' : "--spades_options '-m ${mem_gb}'"
     """
     # Remove any stale SPAdes checkpoints left by previously aborted jobs on this node.
     # beforeScript cannot do this reliably — it fires before Nextflow's `cd \$NXF_SCRATCH`,
@@ -38,6 +42,7 @@ process UNICYCLER {
     unicycler \\
         --threads $task.cpus \\
         $args \\
+        $spades_mem \\
         $short_reads \\
         $long_reads \\
         --out ./
