@@ -267,6 +267,25 @@ Final combined output: `reports/hamronization_summarize/hamronization_combined_r
 | `Ampcombi_summary.tsv` | `reports/ampcombi2/` | All AMP hits, all samples, all tools |
 | `hamronization_combined_report.tsv` | `reports/hamronization_summarize/` | All ARG hits, all samples, all tools |
 
+### Runtime estimates
+
+Empirical measurements on DTU HPC (`hpc` queue, 20-core / 128 GB nodes) with Vibrio genomes (~5 Mb, short reads only):
+
+| Pipeline | Samples | Wall time | CPU hours | Bottleneck |
+|---|---|---|---|---|
+| bacass | 6 | 6h 45m | 129 | UNICYCLER (maxForks=15, ~2h/sample) |
+| funcscan | 5 | ~50m | ~14 (excl. cached) | DEEPBGC (maxForks=10, ~40m/batch) |
+
+**Scaling to 218 genomes** (same genome size, distributed mode):
+
+| Pipeline | Estimate | Reasoning |
+|---|---|---|
+| bacass | ~32–35h | ⌈218/15⌉ = 15 UNICYCLER batches × ~2h |
+| funcscan | ~15h | ⌈218/10⌉ = 22 DEEPBGC batches × ~40m |
+| **Total** | **~47–50h** | Pipelines run sequentially; both fit within 72h head job limit |
+
+> These estimates apply to small bacterial genomes (≤5 Mb). Larger genomes (e.g. Streptomyces ~8 Mb) will have longer assembly and annotation times — scale UNICYCLER memory and expect ~2–3× longer assembly per sample.
+
 ### Submit script details
 
 #### Single node (`submit_bacass.sh`)
@@ -341,8 +360,8 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 
 | Process | CPUs | Memory | Reason |
 |---|---|---|---|
-| unicycler | 2 | 4 GB (→ 8 GB retry) | SPAdes ~1 core avg, 3.3 GB peak observed (33 Vibrio samples, ~4 Mb genomes). Valid for small bacterial genomes (≤5 Mb, clean short reads). For larger/more complex genomes (e.g. Streptomyces ~8 Mb), raise to 4–8 CPUs and adjust maxForks so that cpus × maxForks ≤ 20 slots. |
-| fastqc | 2 | 4 GB (→ 8 GB retry) | `-t 2` processes R1 and R2 in parallel (honest, efficient). `maxForks=10` + `order[-slots]` caps concurrent JVMs and spreads across nodes to prevent CS storms. |
+| unicycler | 4 | 8 GB (→ 16 GB retry) | SPAdes peak ~3.1 GB observed (Vibrio, ~5 Mb genomes); 8 GB covers 10 Mb genomes without retry. cpus=4 caps per-node density at 5 jobs × ~14 OS threads = 70 threads on 20 cores. |
+| fastqc | 2 | 4 GB (→ 8 GB retry) | `-t 2` processes R1 and R2 in parallel (honest, efficient). `maxForks=10` caps concurrent JVMs to prevent context-switch storms. |
 | fastp | 4 | 8 GB (→ 16 GB retry) | Low memory tool; 4 CPUs covers worker + I/O threads |
 | kraken2 | 8 | 10 GB (→ 20 GB retry) | minikraken2 DB ~8 GB; finishes in <1 min |
 | quast | 2 | 4 GB (→ 8 GB retry) | Mostly single-threaded for bacterial genomes |
