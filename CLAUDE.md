@@ -77,6 +77,8 @@ Project-specific scripts in `/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/`
 
 **Do not commit these to the codebase** — they are project-local overrides. `hpcspecial` is a single node so distributed mode is for LSF config testing only; use `submit_bacass.sh` (local executor) for real runs on a single node.
 
+**funcscan on hpcspecial**: `submit_funcscan_hpcspecial.sh` adds `--bgc_skip_deepbgc`. DeepBGC's `errorStrategy='retry'` + `maxRetries=10` is designed to escape transient node-specific failures by landing on a different host each retry — on a single-node queue every retry returns to the same node and the error never escapes. The full `submit_funcscan_distributed.sh` does NOT skip DeepBGC; it runs correctly on multi-node `hpc`.
+
 ### Critical: LSF Memory Fix (NF 25.10.4)
 
 NF 25.10.4 does NOT divide `rusage[mem=X]` by CPUs. Three fixes applied:
