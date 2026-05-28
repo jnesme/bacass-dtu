@@ -43,7 +43,7 @@ process DEEPBGC_PIPELINE {
             rsync -aL ${db}/ /tmp/josne/deepbgc_db/
             touch /tmp/josne/deepbgc_db/.transferred
         fi
-    ) 200>/tmp/josne/.deepbgc_db.lock
+    ) 200>|/tmp/josne/.deepbgc_db.lock
     export DEEPBGC_DOWNLOADS_DIR=/tmp/josne/deepbgc_db
 
     deepbgc \\
