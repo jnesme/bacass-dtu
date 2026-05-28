@@ -75,9 +75,9 @@ Project-specific scripts in `/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/`
 - `submit_bacass_hpcspecial.sh` — head job on `hpcspecial`
 - `lsf_hpcspecial.config` — per-task jobs on `hpcspecial`; `queueSize=10`, `pollInterval=5 min` (single node, testing)
 
-**Do not commit these to the codebase** — they are project-local overrides. `hpcspecial` is a single node so distributed mode is for LSF config testing only; use `submit_bacass.sh` (local executor) for real runs on a single node.
+**Do not commit these to the codebase** — they are project-local overrides. `hpcspecial` is a multi-node queue (nodes added May 2026); distributed mode is valid for testing.
 
-**funcscan on hpcspecial**: `submit_funcscan_hpcspecial.sh` adds `--bgc_skip_deepbgc`. DeepBGC's `errorStrategy='retry'` + `maxRetries=10` is designed to escape transient node-specific failures by landing on a different host each retry — on a single-node queue every retry returns to the same node and the error never escapes. The full `submit_funcscan_distributed.sh` does NOT skip DeepBGC; it runs correctly on multi-node `hpc`.
+**funcscan on hpcspecial**: `submit_funcscan_hpcspecial.sh` adds `--bgc_skip_deepbgc` for test runs. The real failure mode is a stale `/tmp/josne/.deepbgc_db.lock` left on a node after a killed job — every DEEPBGC retry hits line 13 of the patch script and exits 1. If DEEPBGC fails repeatedly after a manual job kill, clear the lock: `bsub -q hpcspecial -n 1 -W 00:05 -R "rusage[mem=512]" "rm -f /tmp/josne/.deepbgc_db.lock"`. The full `submit_funcscan_distributed.sh` does NOT skip DeepBGC.
 
 ### Critical: LSF Memory Fix (NF 25.10.4)
 
