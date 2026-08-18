@@ -19,7 +19,7 @@
 | `NXF_HOME` | `<project>/.nextflow_home/` |
 | `NXF_CONDA_CACHEDIR` | `<project>/.conda_envs/` |
 | `NXF_WORK` | `<project>/work/` |
-| `BACASS_KRAKEN2DB` | `assets/databases/minikraken2_v2_8GB_201904.tgz` |
+| `BACASS_KRAKEN2DB` | `assets/databases/minikraken2_v2_8GB_201904_UPDATE` |
 | `BACASS_KMERFINDERDB` | `assets/databases/kmerfinder_20190108_stable_dirs/bacteria` |
 | `BACASS_BAKTADB` | `assets/databases/bakta_db` |
 | `BACASS_BUSCODB` | `assets/databases/busco_db` |
@@ -40,25 +40,25 @@
 | Process | CPUs | Memory | Time | scratch | maxForks |
 |---|---|---|---|---|---|
 | `UNICYCLER` | **4** | 8→16 GB | 8→16h | ✓ | **15** |
-| `BAKTA` | 6 | 20→40 GB | — | ✓ | **8** |
-| `KRAKEN2` / `KRAKEN2_LONG` | 8 | 10→20 GB | 1h | ✓ | **15** |
+| `BAKTA` | 6 | 20→40 GB | — | — | **8** |
+| `KRAKEN2` / `KRAKEN2_LONG` | 8 | 10→20 GB | 1h | — | **15** |
 | `KMERFINDER` | **1** | **8→16 GB** | — | — | **15** |
 | `FASTQC_RAW/TRIM` | **2** | 4→8 GB | — | — | **10** |
-| `FASTP` | 4 | 8→16 GB | — | ✓ | **30** |
+| `FASTP` | 4 | 8→16 GB | — | — | **20** |
 | `BUSCO_BUSCO` | 4 | 8→16 GB | — | ✓ | **15** |
 | `QUAST` | 2 | 4→8 GB | — | — | — |
-| `RACON` | 8 | 40 GB | 8h | — | — |
-| `MEDAKA` | 8 | 40 GB | 8h | — | — |
-| `LIFTOFF` | 8 | 40 GB | 8h | — | — |
+| `RACON` | 8 | 40 GB | 8h | — | **10** |
+| `MEDAKA` | 8 | 40 GB | 8h | — | **10** |
+| `LIFTOFF` | 8 | 40 GB | 8h | — | **10** |
 | `MINIASM` | 8 | 40 GB | 8h | — | 10 |
 
-FASTP, BUSCO, and BAKTA use `scratch = true` to reduce BeeGFS I/O load. UNICYCLER uses `scratch = true` and cleans stale SPAdes checkpoints via the first line of its script block in `modules/local/unicycler/main.nf` — see Troubleshooting below.
+BUSCO uses `scratch = true` to reduce BeeGFS I/O load. FASTP, KRAKEN2/KRAKEN2_LONG, and BAKTA had `scratch = true` removed (Mar 2026) — their DB/large-output I/O wasn't helped by staging (DB inputs are directories, always symlinked regardless of scratch; FASTP's rsync staging itself caused BeeGFS burst traffic). UNICYCLER uses `scratch = true` and cleans stale SPAdes checkpoints via the first line of its script block in `modules/local/unicycler/main.nf` — see Troubleshooting below.
 
-**FastQC CPU/maxForks rationale**: FastQC supports multi-threading via `-t`: each thread processes one file in parallel. `cpus=2` + `-t 2` processes R1 and R2 simultaneously for paired-end data — honest and efficient. The original incident (1.8M CS/s, Mar 2026) was caused by `cpus=2` with no `-t` flag: the JVM spawned ~20 threads regardless, and LSF bin-packed 10 jobs onto one 20-core node → 200 threads competing for 20 cores. With honest CPU declarations, LSF bin-packing naturally limits jobs per node to match actual thread use. `maxForks=10` provides an additional global concurrency cap. **Note**: with the LSF executor, `maxForks` defaults to effectively unlimited (the head job has 1 CPU; `maxForks` default = CPUs−1 applies to local executor only). Must be set explicitly for any tool where actual resource use differs from nf-core defaults.
+**FastQC CPU/maxForks rationale**: FastQC supports multi-threading via `-t`: each thread processes one file in parallel. `cpus=2` + `-t 2` processes R1 and R2 simultaneously for paired-end data — honest and efficient. The original incident (1.8M CS/s, Mar 2026) was caused by `cpus=2` with no `-t` flag: the JVM spawned ~20 threads regardless, and LSF bin-packed 10 jobs onto one 20-core node → 200 threads competing for 20 cores. With honest CPU declarations, LSF bin-packing naturally limits jobs per node to match actual thread use. `maxForks=10` provides an additional global concurrency cap. **Note**: with the LSF executor, `maxForks` defaults to effectively unlimited (the head job has 1 CPU; `maxForks` default = CPUs−1 applies to local executor only). Must be set explicitly for any tool where actual resource use differs from nf-core defaults. **Caution**: `conf/modules.config` sets `FASTQC_TRIM` args in two `withName` blocks — one guarded by `skip_fastqc` only, one nested inside `skip_fastp` (the block that actually wins in a normal run, since it appears later in the file). Both must carry `-t 2`, or this fix silently regresses. Verify with `nextflow config . -profile conda | grep -A3 "FASTQC_TRIM'"` after touching either block.
 
 **BUSCO maxForks rationale**: For prokaryotic genomes, BUSCO uses Prodigal for gene prediction (not AUGUSTUS). HMMER is genuinely multi-threaded (cpus=4); `maxForks=15` bounds concurrent InfiniBand reads of the lineage dataset (directory input, always symlinked) and caps total HMMER slots (15×4=60).
 
-**InfiniBand/BeeGFS I/O maxForks rationale**: `scratch = true` only copies regular files to /tmp — directory inputs (database paths) are always symlinked and read over InfiniBand. FASTP `maxForks=30`: caps concurrent FASTQ staging (30×7.5 GB=225 GB). KRAKEN2 `maxForks=15`: caps concurrent 7.5 GB DB reads (15×8=120 slots). BAKTA `maxForks=8`: 72 GB DB too large to rsync; 8×8=64 slots. KMERFINDER `maxForks=15`: 17 GB DB, no scratch (15×17 GB=255 GB concurrent); `cpus=1` because kmerfinder.py is single-threaded Python.
+**InfiniBand/BeeGFS I/O maxForks rationale**: directory inputs (database paths) are always symlinked and read over InfiniBand regardless of `scratch`. FASTP `maxForks=20`: no scratch (removed Mar 2026 — rsync staging caused BeeGFS burst traffic); cap is a general concurrency bound, not DB-related — FASTP is C++ and well-behaved. KRAKEN2 `maxForks=15`: scratch removed too (DB dir was always symlinked, not rsynced); caps concurrent 7.5 GB DB reads (15×8=120 LSF slots). BAKTA `maxForks=8`: scratch removed too; 72 GB DB too large to rsync anyway; 8×6=48 slots. KMERFINDER `maxForks=15`: 17 GB DB, no scratch (15×17 GB=255 GB concurrent); `cpus=1` because kmerfinder.py is single-threaded Python.
 
 **Error handling**: retries on exit codes 130-145, 104, 175. `maxRetries = 1`. Resources double on retry.
 
