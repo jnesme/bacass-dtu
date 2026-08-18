@@ -25,8 +25,8 @@
 #==========================================================================
 # EDIT THESE BEFORE SUBMITTING
 #==========================================================================
-INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/test5.samplesheet.tsv"
-OUTDIR="/work3/josne/github/bacass/results"
+INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/samplesheet_90.tsv"
+OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/Bacass_results"
 ASSEMBLY_TYPE="short"   # short, long, or hybrid
 #==========================================================================
 
