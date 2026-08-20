@@ -67,8 +67,16 @@ export LSF_ENVDIR="${BACASS_DIR}/conf/lsf_shadow"
 # Keep Nextflow home (pulled pipelines, plugins) inside the project
 export NXF_HOME="${BACASS_DIR}/.nextflow_home"
 mkdir -p "${NXF_HOME}"
-# Keep work directory inside the project for portability
-export NXF_WORK="${NXF_WORK:-${BACASS_DIR}/work}"
+# Work directory: "work/" next to OUTDIR (not inside the pipeline repo), so each
+# project/batch gets its own scratch cache instead of every run — across every
+# project, test or production — sharing one ever-growing work/ under BACASS_DIR.
+# Falls back to BACASS_DIR/work if OUTDIR isn't set (e.g. sourcing setup.sh
+# standalone, before a submit script has defined it).
+if [ -n "${OUTDIR:-}" ]; then
+    export NXF_WORK="${NXF_WORK:-$(dirname "${OUTDIR}")/work}"
+else
+    export NXF_WORK="${NXF_WORK:-${BACASS_DIR}/work}"
+fi
 
 # Offline mode: uncomment to prevent Nextflow from fetching remote configs
 # export NXF_OFFLINE=true

@@ -23,8 +23,8 @@
 #==========================================================================
 # EDIT THESE BEFORE SUBMITTING
 #==========================================================================
-INPUT="/path/to/samplesheet.tsv"
-OUTDIR="/path/to/results"
+INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/samplesheet_90.tsv"
+OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/Bacass_results_batch2"
 ASSEMBLY_TYPE="short"   # short, long, or hybrid
 #==========================================================================
 
