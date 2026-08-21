@@ -255,7 +255,7 @@ Final combined output: `reports/ampcombi2/Ampcombi_summary.tsv` (all samples × 
 | Step | Per-sample output | Notes |
 |------|-------------------|-------|
 | `ABRICATE_RUN`, `AMRFINDERPLUS_RUN`, `DEEPARG`, `FARGENE`, `RGI_MAIN` | `arg/<tool>/<id>/` | Raw per-tool predictions |
-| `HAMRONIZATION_<TOOL>` | `arg/hamronization/<tool>/<id>.tsv` | Standardised TSV; `sample_id = <id>` |
+| `HAMRONIZATION_<TOOL>` | `arg/hamronization/<tool>/*.tsv` | Standardised TSV, flat (no per-sample subdir); filename embeds the raw tool output name, e.g. `<id>.txt.abricate.tsv`, `<id>.mapping.ARG.deeparg.tsv`. DeepARG produces **two** files per sample (`.mapping.ARG.` and `.mapping.potential.ARG.`). `sample_id` column inside each file is `<id>` |
 
 Final combined output: `reports/hamronization_summarize/hamronization_combined_report.tsv` (all samples × all ARG tools)
 
@@ -309,7 +309,7 @@ All processes run on one node. Best for few samples or quick runs.
 |---|---|
 | Cores | 20 |
 | Memory | 120 GB (6 GB/core) |
-| Wall time | 72h |
+| Wall time | 48h |
 | Output | `bacass_<JOBID>.out` / `.err` |
 
 #### Distributed (`submit_bacass_distributed.sh`)
@@ -322,7 +322,7 @@ Each pipeline task is submitted as a separate LSF job. Tuned for 100+ genome run
 | Per-task jobs | Resources from base.config labels (up to 20 cores / 120 GB) |
 | Max concurrent jobs | 50 (~400 cores peak at 8 CPUs avg) |
 | Wall time | 72h |
-| Unicycler mode | `--mode bold --no_correct` (2-3x faster) |
+| Unicycler mode | Default (empty `--unicycler_args`) — pass `--unicycler_args "--mode bold"` yourself for ~2-3x faster assembly at some accuracy cost |
 | `-resume` | enabled |
 | Output | `bacass_head_<JOBID>.out` / `.err` |
 
@@ -364,10 +364,12 @@ All resources are capped at **20 CPUs / 120 GB RAM** to fit DTU HPC's smallest n
 
 | Label | Attempt 1 | Retry (attempt 2) | Used by |
 |---|---|---|---|
-| `process_single` | 1 CPU / 6 GB | 1 CPU / 12 GB | cat/fastq, gunzip, untar, multiqc |
+| `process_single` | 1 CPU / 6 GB | 1 CPU / 12 GB | cat/fastq, gunzip, untar |
 | `process_low` | 4 CPU / 16 GB | 8 CPU / 32 GB | prokka, nanoplot, toulligqc, filtlong |
-| `process_medium` | 8 CPU / 40 GB | 16 CPU / 80 GB | fastqc, fastp, porechop, dragonflye, quast, busco, bakta, dfast, kmerfinder |
+| `process_medium` | 8 CPU / 40 GB | 16 CPU / 80 GB | fastqc, fastp, porechop, dragonflye, quast, busco, bakta, dfast, multiqc |
 | `process_high` | 16 CPU / 40 GB | 20 CPU / 80 GB | unicycler, canu, nanopolish |
+
+> `KMERFINDER_KMERFINDER` carries no label at all — its resources come entirely from the explicit override below (1 CPU / 8→16 GB), unrelated to any of these base labels.
 
 Per-process overrides in `conf/modules.config` reduce resources for processes that don't benefit from high parallelism:
 
@@ -377,6 +379,7 @@ Per-process overrides in `conf/modules.config` reduce resources for processes th
 | fastqc | 2 | 4 GB (→ 8 GB retry) | `-t 2` processes R1 and R2 in parallel (honest, efficient). `maxForks=10` caps concurrent JVMs to prevent context-switch storms. |
 | fastp | 4 | 8 GB (→ 16 GB retry) | Low memory tool; 4 CPUs covers worker + I/O threads |
 | kraken2 | 8 | 10 GB (→ 20 GB retry) | minikraken2 DB ~8 GB; finishes in <1 min |
+| kmerfinder | 1 | 8 GB (→ 16 GB retry) | kmerfinder.py is single-threaded Python; 17 GB DB read, no scratch (`maxForks=15` caps concurrent DB reads) |
 | quast | 2 | 4 GB (→ 8 GB retry) | Mostly single-threaded for bacterial genomes |
 | busco | 4 | 8 GB (→ 16 GB retry) | HMMER-based; memory-light, doesn't scale past ~4 CPUs |
 | bakta | 6 | 20 GB (→ 40 GB retry) | ~4.6 cores avg, 13 GB peak observed; 72 GB DB read over InfiniBand |
@@ -426,7 +429,14 @@ tail -f bacass_head_*.out              # bacass progress
 tail -f funcscan_head_*.out            # funcscan progress (use this, not .nextflow.log — it goes to temp dir)
 
 # Analyze resource usage after a run
+# NOTE: timeline/report/trace are disabled by default project-wide (BeeGFS write
+# overhead — see Nextflow Reporting in CLAUDE.md), so execution_trace_*.txt is
+# never generated as-is. Either re-enable trace for a specific run (add
+# `-c <(echo 'trace.enabled = true')` or edit nextflow.config), then run:
 bin/trace_summary.py /your/Bacass_results/pipeline_info/execution_trace_*.txt
+# ...or get real per-task timing without re-running anything, by parsing
+# .nextflow.log's own started:/exited: timestamps instead — see "Runtime
+# estimates" above for the method used to produce this README's own numbers.
 
 # Resume after interruption
 bsub < submit_bacass_distributed.sh    # just resubmit — skips completed steps
