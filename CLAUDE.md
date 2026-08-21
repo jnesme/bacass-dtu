@@ -144,6 +144,8 @@ Merges themselves are cheap (symlinking, seconds) — run them directly in your 
 
 **Known caveat**: `run_funcscan_aggregation.sh` intentionally never regenerates `reports/combgc/combgc_complete_summary.tsv` — see its Step 3 comment. Investigated Aug 2026: per-sample `combgc_summary.tsv` files were found to contain only antiSMASH rows while the existing aggregate also has DeepBGC/GECCO rows for the same samples (confirmed systemic, confirmed DeepBGC/GECCO data existed before COMBGC ran). Root cause undetermined — funcscan's own work dir and the contemporaneous `.nextflow.log` are both gone. Leave the existing aggregate untouched rather than risk overwriting good data with an incomplete regeneration.
 
+**geNomad plasmid/virus scan** (`./run_genomad_scan.sh <OUTDIR> [threads]`, submit via `bsub` like the others): runs geNomad end-to-end on every `Unicycler/*.scaffolds.fa.gz` in a bacass OUTDIR, publishing per-sample results to `OUTDIR/genomad/<sample>/` plus a cross-sample `genomad_summary.tsv` (n_plasmids, n_viruses, largest_plasmid_bp, has_conjugation_genes, amr_gene_families). geNomad (env + database) lives outside this repo, at `/work3/josne/miniconda3/envs/genomad` and `/work3/josne/Databases/genomad_db`. Unlike Unicycler's own "closed/circular" flag (a narrow graph-topology heuristic — only 17/38 completed batch2 samples had one), geNomad scores every contig by composition + marker genes regardless of topology, catching plasmid-derived contigs that never closed. ~3.5 min/sample at 8 threads for a ~6 Mb genome.
+
 ## Repository Layout
 
 ```
@@ -158,6 +160,7 @@ run_bacass_aggregation.sh       # Standalone QUAST+Kmerfinder+MultiQC re-run fro
 run_funcscan_aggregation.sh     # Standalone hamronize/ampcombi/MultiQC re-run from an OUTDIR
 merge_bacass_batches.sh         # Merge multiple bacass OUTDIRs for a combined aggregation
 merge_funcscan_batches.sh       # Merge multiple funcscan OUTDIRs for a combined aggregation
+run_genomad_scan.sh             # geNomad plasmid/virus scan across a bacass OUTDIR's assemblies
 conf/
   base.config                   # Resource labels
   lsf.config                    # LSF executor (perTaskReserve, pollInterval)
