@@ -269,20 +269,33 @@ Final combined output: `reports/hamronization_summarize/hamronization_combined_r
 
 ### Runtime estimates
 
-Empirical measurements on DTU HPC (`hpc` queue, 20-core / 128 GB nodes) with Vibrio genomes (~5 Mb, short reads only):
+**Per-process time, bacass** (Vibrio genomes, ~5 Mb, short reads only). Measured Aug 2026 from a live 83-sample distributed run (`Bacass_results_batch2`), by parsing real task `started:`/`exited:` timestamps directly out of `.nextflow.log` — `timeline`/`report`/`trace` are deliberately disabled project-wide (see [Nextflow Reporting](../CLAUDE.md) — BeeGFS write overhead), so this is the way to get real per-task timing on this project. Excludes cached/resumed tasks (only real executions counted):
+
+| Process | n samples | min | median | mean | max |
+|---|---|---|---|---|---|
+| **UNICYCLER** | 29 | 3h 12m | **4h 43m** | 5h 04m | 7h 54m |
+| BAKTA_BAKTA | 9 | 13m 44s | 16m 38s | 16m 25s | 19m 17s |
+| FASTQC_RAW | 39 | 2s | 30s | 35s | 1m 22s |
+| FASTQC_TRIM | 46 | 0s | 29s | 31s | 1m 30s |
+| KRAKEN2 | 17 | 0s | 26s | 22s | 42s |
+| FASTP | 27 | 2s | 25s | 25s | 1m 05s |
+| BUSCO_BUSCO | 8 | 7s | 19s | 23s | 42s |
+| KMERFINDER_KMERFINDER | 21 | 2s | 17s | 18s | 57s |
+
+UNICYCLER dominates by a huge margin — every other process finishes in under two minutes per sample except Bakta (~15-19 min). This supersedes an earlier, much smaller measurement (6 samples) that had estimated ~2h/sample for UNICYCLER — the real median across a larger, more representative sample is more than double that; one sample (`S1073_1`) hit UNICYCLER's 8h wall-time limit on its first attempt and needed the automatic retry (16h limit on attempt 2) to finish. Budget accordingly — `maxForks=15` on UNICYCLER means wall time for N samples is roughly `⌈N/15⌉ × 4h 43m` (median), but a straggler can take up to ~8h, so pad your `-W` walltime estimate well past the naive median-based math.
+
+**Scaling** (revised with the corrected median — supersedes the older 2h/sample-based estimate):
+
+| Samples | UNICYCLER estimate | Reasoning |
+|---|---|---|
+| 83 (batch2) | ~26–33h | ⌈83/15⌉ = 6 batches × 4h 43m median, +padding for stragglers up to ~8h |
+| 218 | ~70–75h | ⌈218/15⌉ = 15 batches × 4h 43m median — right at or past the 72h head job limit; consider raising `submit_bacass_distributed.sh`'s `-W` or running in stages |
+
+**Funcscan** (older, smaller-scale measurement, not yet re-validated at this larger scale):
 
 | Pipeline | Samples | Wall time | CPU hours | Bottleneck |
 |---|---|---|---|---|
-| bacass | 6 | 6h 45m | 129 | UNICYCLER (maxForks=15, ~2h/sample) |
 | funcscan | 5 | ~50m | ~14 (excl. cached) | DEEPBGC (maxForks=10, ~40m/batch) |
-
-**Scaling to 218 genomes** (same genome size, distributed mode):
-
-| Pipeline | Estimate | Reasoning |
-|---|---|---|
-| bacass | ~32–35h | ⌈218/15⌉ = 15 UNICYCLER batches × ~2h |
-| funcscan | ~15h | ⌈218/10⌉ = 22 DEEPBGC batches × ~40m |
-| **Total** | **~47–50h** | Pipelines run sequentially; both fit within 72h head job limit |
 
 > These estimates apply to small bacterial genomes (≤5 Mb). Larger genomes (e.g. Streptomyces ~8 Mb) will have longer assembly and annotation times — scale UNICYCLER memory and expect ~2–3× longer assembly per sample.
 
