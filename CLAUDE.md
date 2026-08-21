@@ -60,7 +60,7 @@ BUSCO uses `scratch = true` to reduce BeeGFS I/O load. FASTP, KRAKEN2/KRAKEN2_LO
 
 **InfiniBand/BeeGFS I/O maxForks rationale**: directory inputs (database paths) are always symlinked and read over InfiniBand regardless of `scratch`. FASTP `maxForks=20`: no scratch (removed Mar 2026 — rsync staging caused BeeGFS burst traffic); cap is a general concurrency bound, not DB-related — FASTP is C++ and well-behaved. KRAKEN2 `maxForks=15`: scratch removed too (DB dir was always symlinked, not rsynced); caps concurrent 7.5 GB DB reads (15×8=120 LSF slots). BAKTA `maxForks=8`: scratch removed too; 72 GB DB too large to rsync anyway; 8×6=48 slots. KMERFINDER `maxForks=15`: 17 GB DB, no scratch (15×17 GB=255 GB concurrent); `cpus=1` because kmerfinder.py is single-threaded Python.
 
-**Error handling**: retries on exit codes 130-145, 104, 175. `maxRetries = 1`. Resources double on retry.
+**Error handling**: retries on exit codes 130-145, 104, 126, 175. `maxRetries = 1`. Resources double on retry. Exit 126 added Aug 2026 — transient exec-time filesystem hiccup ("`/usr/bin/env: bad interpreter: No such file or directory`"), same class of intermittent BeeGFS/NFS flakiness as the ENOENT issues below, just at `exec()` instead of `import()` time. Not tool-specific — any Python-shebang process can hit it.
 
 ## LSF Submission
 
@@ -116,6 +116,34 @@ Screening: BGC (antiSMASH, DeepBGC, GECCO), AMP (ampir, amplify, macrel, hmmsear
 
 **After re-running bacass** (e.g. following assembly correctness issues), use `bin/compare_assemblies_for_funcscan.sh` to generate a samplesheet that preserves the funcscan `-resume` cache for unchanged assemblies and only re-runs changed ones — avoiding a full funcscan re-run.
 
+## Standalone Aggregation Scripts
+
+Regenerate a pipeline's aggregation results (MultiQC, Kmerfinder summary, hAMRonization/AMPcombi summaries) directly from a published `OUTDIR`, entirely outside Nextflow. Needed when a batch's raw reads and/or Nextflow work dir have been deleted — at that point `-resume` can never touch that batch again (Nextflow validates every input path with `checkIfExists: true` before it even reaches cache logic), so this is the only way to produce a report spanning it. Read-only against sources; nothing in a batch's OUTDIR is modified except the aggregation script's own output.
+
+**Single batch:**
+```bash
+./run_bacass_aggregation.sh <OUTDIR> [assembly_type]      # QUAST + Kmerfinder summary + MultiQC
+./run_funcscan_aggregation.sh <OUTDIR>                      # hamronize summarize + ampcombi complete + MultiQC
+```
+
+**Multiple batches combined** — merge into a union directory first, then aggregate that:
+```bash
+./merge_bacass_batches.sh <TARGET_DIR> <BATCH_DIR_1> <BATCH_DIR_2> [...]
+./run_bacass_aggregation.sh <TARGET_DIR>
+# same pattern with merge_funcscan_batches.sh / run_funcscan_aggregation.sh
+```
+The merge scripts symlink files (not whole directories — `find -mindepth N -maxdepth N`, which the aggregation scripts rely on, doesn't descend into symlinked directories) into a fresh `TARGET_DIR`, and refuse to run if the same sample ID appears in more than one source batch or if `TARGET_DIR` already exists. Merging while a batch is still mid-run produces a valid-but-partial snapshot (samples get `NA` in columns for stages they haven't reached yet) — re-merge once all batches are actually finished for a complete report.
+
+**Submitting via `bsub`**: the `#BSUB` header in each script is only auto-parsed by `bsub < script.sh`, which can't pass a positional argument. To pass `OUTDIR`, specify resources explicitly and invoke the script directly instead:
+```bash
+bsub -q hpc -n 8 -R "span[hosts=1] rusage[mem=6GB]" -M 6500MB -W 02:00 \
+  -o bacass_aggregation_%J.out -e bacass_aggregation_%J.err \
+  ./run_bacass_aggregation.sh <OUTDIR>
+```
+Merges themselves are cheap (symlinking, seconds) — run them directly in your shell, no `bsub` needed.
+
+**Known caveat**: `run_funcscan_aggregation.sh` intentionally never regenerates `reports/combgc/combgc_complete_summary.tsv` — see its Step 3 comment. Investigated Aug 2026: per-sample `combgc_summary.tsv` files were found to contain only antiSMASH rows while the existing aggregate also has DeepBGC/GECCO rows for the same samples (confirmed systemic, confirmed DeepBGC/GECCO data existed before COMBGC ran). Root cause undetermined — funcscan's own work dir and the contemporaneous `.nextflow.log` are both gone. Leave the existing aggregate untouched rather than risk overwriting good data with an incomplete regeneration.
+
 ## Repository Layout
 
 ```
@@ -126,6 +154,10 @@ submit_bacass.sh                # Single-node LSF submit
 submit_bacass_distributed.sh    # Distributed LSF submit
 bacass_to_funcscan.sh           # Generate funcscan samplesheet
 submit_funcscan_distributed.sh  # Funcscan LSF submit
+run_bacass_aggregation.sh       # Standalone QUAST+Kmerfinder+MultiQC re-run from an OUTDIR
+run_funcscan_aggregation.sh     # Standalone hamronize/ampcombi/MultiQC re-run from an OUTDIR
+merge_bacass_batches.sh         # Merge multiple bacass OUTDIRs for a combined aggregation
+merge_funcscan_batches.sh       # Merge multiple funcscan OUTDIRs for a combined aggregation
 conf/
   base.config                   # Resource labels
   lsf.config                    # LSF executor (perTaskReserve, pollInterval)
