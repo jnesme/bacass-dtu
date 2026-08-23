@@ -44,8 +44,8 @@
 | `KRAKEN2` / `KRAKEN2_LONG` | 8 | 10→20 GB | 1h | — | **15** |
 | `KMERFINDER` | **1** | **8→16 GB** | — | — | **15** |
 | `FASTQC_RAW/TRIM` | **2** | 4→8 GB | — | — | **10** |
-| `FASTP` | 4 | 8→16 GB | — | — | **20** |
-| `BUSCO_BUSCO` | 4 | 8→16 GB | — | ✓ | **15** |
+| `FASTP` | 4 | 3→6 GB | — | — | **20** |
+| `BUSCO_BUSCO` | 4 | 2→4 GB | — | ✓ | **15** |
 | `QUAST` | 2 | 4→8 GB | — | — | — |
 | `RACON` | 8 | 40 GB | 8h | — | **10** |
 | `MEDAKA` | 8 | 40 GB | 8h | — | **10** |
@@ -59,6 +59,8 @@ BUSCO uses `scratch = true` to reduce BeeGFS I/O load. FASTP, KRAKEN2/KRAKEN2_LO
 **BUSCO maxForks rationale**: For prokaryotic genomes, BUSCO uses Prodigal for gene prediction (not AUGUSTUS). HMMER is genuinely multi-threaded (cpus=4); `maxForks=15` bounds concurrent InfiniBand reads of the lineage dataset (directory input, always symlinked) and caps total HMMER slots (15×4=60).
 
 **InfiniBand/BeeGFS I/O maxForks rationale**: directory inputs (database paths) are always symlinked and read over InfiniBand regardless of `scratch`. FASTP `maxForks=20`: no scratch (removed Mar 2026 — rsync staging caused BeeGFS burst traffic); cap is a general concurrency bound, not DB-related — FASTP is C++ and well-behaved. KRAKEN2 `maxForks=15`: scratch removed too (DB dir was always symlinked, not rsynced); caps concurrent 7.5 GB DB reads (15×8=120 LSF slots). BAKTA `maxForks=8`: scratch removed too; 72 GB DB too large to rsync anyway; 8×6=48 slots. KMERFINDER `maxForks=15`: 17 GB DB, no scratch (15×17 GB=255 GB concurrent); `cpus=1` because kmerfinder.py is single-threaded Python.
+
+**Memory right-sizing (Aug 2026)**: `FASTP` (8→3 GB) and `BUSCO_BUSCO` (8→2 GB) were both reduced after checking real usage across the batch2 83-sample run (parsed `Max Memory` from each task's `.command.log`): FASTP peaked at 1.38 GB, BUSCO at 445 MB — both were over-reserved by 5-18x with no offsetting benefit (unlike CPU under-declaration, over-reserving memory only blocks other users from shared node RAM). `KMERFINDER` (8 GB) was checked the same way and left untouched — a single low sample looked like a reduction candidate, but the full 73-sample distribution had a median of 5.8 GB, so 8 GB is already correctly sized. Always pull the full usage distribution across a real batch before resizing a memory declaration, not a single sample — see [[feedback_resource_tuning]] in project memory.
 
 **Error handling**: retries on exit codes 130-145, 104, 126, 175. `maxRetries = 1`. Resources double on retry. Exit 126 added Aug 2026 — transient exec-time filesystem hiccup ("`/usr/bin/env: bad interpreter: No such file or directory`"), same class of intermittent BeeGFS/NFS flakiness as the ENOENT issues below, just at `exec()` instead of `import()` time. Not tool-specific — any Python-shebang process can hit it.
 
