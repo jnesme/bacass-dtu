@@ -23,12 +23,14 @@
 #==========================================================================
 # EDIT THESE BEFORE SUBMITTING
 #==========================================================================
-INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_full.csv"
-OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_results"
+INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_batch2.csv"
+OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_results_batch2"
 
 # Work directory — keep consistent between test and full run so -resume works.
 # Use a project-specific path so multiple projects don't share the same cache.
-FUNCSCAN_WORK="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/work_funcscan"
+# Separate from batch1's work_funcscan/ (that run is finished, results final) —
+# same pattern as Bacass_results_batch2 being kept separate from Bacass_results.
+FUNCSCAN_WORK="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/work_funcscan_batch2"
 
 # Screening modules — set to "true" or "false"
 RUN_BGC="true"   # BGC: antiSMASH, DeepBGC, GECCO
