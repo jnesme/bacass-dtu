@@ -26,7 +26,17 @@
 # combgc which that script deliberately never regenerates — see its own
 # comments for why):
 # reports/hamronization_summarize/, reports/ampcombi2/*.tsv (top-level),
-# reports/combgc/*.tsv (top-level), multiqc/, pipeline_info/.
+# reports/combgc/*.tsv (top-level), multiqc/, pipeline_info/ (the noisy
+# per-resume execution_report_*/execution_timeline_*/pipeline_dag_* files).
+#
+# Exception: pipeline_info/nf_core_funcscan_software_mqc_versions.yml (one
+# small, non-timestamped file per batch) IS carried over, one per batch under
+# a batch-prefixed name — it's the only pipeline_info file
+# run_funcscan_aggregation.sh's MultiQC step actually consumes. Without it,
+# the merged OUTDIR has nothing to feed MultiQC (no per-sample QC modules run
+# either, since these are pre-annotated Bakta samplesheets — see that
+# script's Step 4 comment), so MultiQC reports "No analysis results found"
+# and produces no report.html at all.
 #
 # Usage:
 #   ./merge_funcscan_batches.sh <TARGET_DIR> <BATCH_DIR_1> <BATCH_DIR_2> [...]
@@ -164,6 +174,35 @@ for tool in "${FLAT_TOOLS[@]}"; do
     [ "${merged_count}" -gt 0 ] && echo "${tool}: ${merged_count} files merged"
 done
 
+# --- Step 4: carry over the pipeline_info files MultiQC actually reads ---
+# nf_core_funcscan_software_mqc_versions.yml is always published to pipeline_info/.
+# workflow_summary_mqc.yaml / methods_description_mqc.yaml are NOT published by
+# funcscan itself (they're transient MultiQC-module inputs living only in
+# Nextflow's work dir) — they only end up here if someone copied them out of
+# the work dir into pipeline_info/ before it was cleaned up (see CLAUDE.md /
+# run_funcscan_aggregation.sh Step 4 comment for why this matters). Batch-
+# prefixed to avoid collisions; custom_content matches by embedded id, not
+# filename, so renaming doesn't break MultiQC's ability to read them.
+echo ""
+echo "=== Step 4: Merging pipeline_info files MultiQC reads ==="
+
+MQC_INFO_FILES=(
+    nf_core_funcscan_software_mqc_versions.yml
+    workflow_summary_mqc.yaml
+    methods_description_mqc.yaml
+)
+versions_count=0
+for batch in "${BATCH_DIRS[@]}"; do
+    for fname in "${MQC_INFO_FILES[@]}"; do
+        src="${batch}/pipeline_info/${fname}"
+        [ -f "${src}" ] || continue
+        mkdir -p "${TARGET}/pipeline_info"
+        ln -s "${src}" "${TARGET}/pipeline_info/$(basename "${batch}")_${fname}"
+        versions_count=$((versions_count + 1))
+    done
+done
+[ "${versions_count}" -gt 0 ] && echo "pipeline_info: ${versions_count} MultiQC info files merged"
+
 echo ""
 echo "=========================================="
 echo "Done on $(date)"
@@ -171,6 +210,6 @@ echo "Merged OUTDIR: ${TARGET}"
 echo "Not merged (regenerate fresh against this OUTDIR instead, except combgc — see"
 echo "run_funcscan_aggregation.sh's own comments): reports/hamronization_summarize/,"
 echo "reports/ampcombi2/*.tsv (top-level), reports/combgc/*.tsv (top-level), multiqc/,"
-echo "pipeline_info/"
+echo "pipeline_info/ (except software-versions ymls, merged above)"
 echo "Next: ./run_funcscan_aggregation.sh ${TARGET}"
 echo "=========================================="

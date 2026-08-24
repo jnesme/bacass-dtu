@@ -170,8 +170,24 @@ echo "=== Step 4: funcscan MultiQC ==="
 MQ_STAGING=$(mktemp -d)
 trap 'rm -rf "${MQ_STAGING}"' EXIT
 
-[ -d "${OUTDIR}/pipeline_info" ]      && ln -s "${OUTDIR}/pipeline_info" "${MQ_STAGING}/pipeline_info"
-[ -d "${OUTDIR}/annotation/prokka" ]  && ln -s "${OUTDIR}/annotation/prokka" "${MQ_STAGING}/prokka"
+# Symlink files individually, NOT the whole directory as one symlink: MultiQC's
+# own file walker does not descend into a symlinked directory (same class of
+# gotcha as `find -mindepth/-maxdepth` elsewhere in this project's scripts) —
+# a bare `ln -s OUTDIR/pipeline_info staging/pipeline_info` silently causes
+# "No analysis results found", even when the linked-to directory has real,
+# matching files inside it. Confirmed via direct multiqc testing (Aug 2026).
+if [ -d "${OUTDIR}/pipeline_info" ]; then
+    mkdir -p "${MQ_STAGING}/pipeline_info"
+    for f in "${OUTDIR}/pipeline_info"/*; do
+        [ -f "$f" ] && ln -s "$f" "${MQ_STAGING}/pipeline_info/$(basename "$f")"
+    done
+fi
+if [ -d "${OUTDIR}/annotation/prokka" ]; then
+    mkdir -p "${MQ_STAGING}/prokka"
+    for f in "${OUTDIR}/annotation/prokka"/*; do
+        [ -f "$f" ] && ln -s "$f" "${MQ_STAGING}/prokka/$(basename "$f")"
+    done
+fi
 
 (
     cd "${MQ_STAGING}"
