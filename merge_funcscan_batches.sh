@@ -68,6 +68,10 @@ FLAT_TOOLS=(
     arg/hamronization/abricate arg/hamronization/amrfinderplus
     arg/hamronization/deeparg arg/hamronization/rgi arg/hamronization/fargene
 )
+# Non-sample subdirectories that can appear alongside real per-sample dirs
+# under reports/ampcombi2 (e.g. the AMPcombi reference DB published at the
+# top level by an older run) — excluded so they aren't mistaken for samples.
+SUBDIR_EXCLUDE=(amp_DRAMP_database)
 
 echo "=========================================="
 echo "Funcscan batch merge"
@@ -95,6 +99,10 @@ for batch in "${BATCH_DIRS[@]}"; do
         exit 1
     fi
     mapfile -t ids < <(find "${ids_source}" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+    for excl in "${SUBDIR_EXCLUDE[@]}"; do
+        ids=("${ids[@]/${excl}}")
+    done
+    for i in "${!ids[@]}"; do [ -z "${ids[$i]}" ] && unset 'ids[i]'; done
     echo "${batch} (IDs from ${ids_source#${batch}/}): ${#ids[@]} samples"
     for id in "${ids[@]}"; do
         if [ -n "${seen_sample_batch[$id]:-}" ]; then
@@ -125,6 +133,9 @@ for tool in "${SUBDIR_TOOLS[@]}"; do
         [ -d "${batch}/${tool}" ] || continue
         while IFS= read -r sample_dir; do
             sample="$(basename "${sample_dir}")"
+            for excl in "${SUBDIR_EXCLUDE[@]}"; do
+                [ "${sample}" = "${excl}" ] && continue 2
+            done
             mkdir -p "${TARGET}/${tool}/${sample}"
             for f in "${sample_dir}"/*; do
                 [ -f "$f" ] && ln -s "$f" "${TARGET}/${tool}/${sample}/$(basename "$f")"
