@@ -267,6 +267,47 @@ Final combined output: `reports/hamronization_summarize/hamronization_combined_r
 | `Ampcombi_summary.tsv` | `reports/ampcombi2/` | All AMP hits, all samples, all tools |
 | `hamronization_combined_report.tsv` | `reports/hamronization_summarize/` | All ARG hits, all samples, all tools |
 
+### Step 8: Anti-phage defense-system proximity analysis (optional)
+
+After funcscan's BGC branch has produced antiSMASH BGC calls, you can check which of those BGCs sit near a known bacterial anti-phage defense system (CRISPR-Cas, restriction-modification, and dozens of others). This is motivated by [Shomar et al. 2026](https://doi.org/10.1016/j.chom.2026.06.017) (*Cell Host & Microbe*, "A family of lanthipeptides with anti-phage function"), which found a clade of lanthipeptide BGCs in Actinobacteria strongly enriched near defense systems — several of which were experimentally confirmed to have genuine anti-phage activity themselves. This analysis reproduces the same style of BGC↔defense-system proximity screen on your own genomes.
+
+Two standalone tools are involved, run outside Nextflow, directly against a completed bacass + funcscan run:
+
+- **[DefenseFinder](https://github.com/mdmparis/defense-finder)** (`run_defensefinder_scan.sh`) detects defense systems from each sample's Bakta protein FASTA.
+- **`bin/bgc_defense_proximity.py`** joins those hits against antiSMASH's BGC coordinates to compute, per BGC, the nearest defense system in both gene-index distance (default window: ±23 genes, matching the paper) and bp distance.
+
+**Step 8a — Run DefenseFinder across your genomes**
+
+```bash
+cd /path/to/your/project
+
+bsub -q hpc -n 8 -R "span[hosts=1] rusage[mem=8GB]" -M 8500MB -W 06:00 \
+  -o defensefinder_scan_%J.out -e defensefinder_scan_%J.err \
+  /path/to/bacass/run_defensefinder_scan.sh /path/to/your/Bacass_results
+```
+
+This publishes per-sample results to `Bacass_results/defensefinder/<id>/` plus a cross-sample `defensefinder_summary.tsv`. DefenseFinder itself (env + models) is not part of this repo's conda-env bundle — see CLAUDE.md for where it lives and how to set it up.
+
+**Step 8b — Join against antiSMASH BGC calls**
+
+```bash
+python3 /path/to/bacass/bin/bgc_defense_proximity.py \
+    --bacass-outdir /path/to/your/Bacass_results \
+    --funcscan-outdir /path/to/your/funcscan_results \
+    --window-genes 23 \
+    -o bgc_defense_proximity.tsv
+```
+
+Output is one row per BGC region, keyed by the same `Record` ID format used by BiG-SCAPE's `record_annotations.tsv` (e.g. `S1190_contig_53.region001.gbk_region_1`), so it can be joined directly against any BiG-SCAPE clustering output you may already have, without a separate ID scheme.
+
+| Column | Meaning |
+|--------|---------|
+| `bgc_gene_idx_min`/`max` | Gene-index range of the BGC (Bakta CDS-only, file order) |
+| `nearest_defense_sys_id`/`type`/`subtype` | The closest defense system on the same contig, if any |
+| `defense_gene_distance` | Gene-index gap to that system (`0` = overlapping) |
+| `defense_bp_distance` | Same, in nucleotides |
+| `within_window` | `yes` if `defense_gene_distance <= --window-genes` |
+
 ### Runtime estimates
 
 **Per-process time, bacass** (Vibrio genomes, ~5 Mb, short reads only). Measured Aug 2026 from a live 83-sample distributed run (`Bacass_results_batch2`), by parsing real task `started:`/`exited:` timestamps directly out of `.nextflow.log` — `timeline`/`report`/`trace` are deliberately disabled project-wide (see [Nextflow Reporting](../CLAUDE.md) — BeeGFS write overhead), so this is the way to get real per-task timing on this project. Excludes cached/resumed tasks (only real executions counted):

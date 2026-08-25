@@ -148,6 +148,8 @@ Merges themselves are cheap (symlinking, seconds) — run them directly in your 
 
 **geNomad plasmid/virus scan** (`./run_genomad_scan.sh <OUTDIR> [threads]`, submit via `bsub` like the others): runs geNomad end-to-end on every `Unicycler/*.scaffolds.fa.gz` in a bacass OUTDIR, publishing per-sample results to `OUTDIR/genomad/<sample>/` plus a cross-sample `genomad_summary.tsv` (n_plasmids, n_viruses, largest_plasmid_bp, has_conjugation_genes, amr_gene_families). geNomad (env + database) lives outside this repo, at `/work3/josne/miniconda3/envs/genomad` and `/work3/josne/Databases/genomad_db`. Unlike Unicycler's own "closed/circular" flag (a narrow graph-topology heuristic — only 17/38 completed batch2 samples had one), geNomad scores every contig by composition + marker genes regardless of topology, catching plasmid-derived contigs that never closed. ~3.5 min/sample at 8 threads for a ~6 Mb genome.
 
+**DefenseFinder anti-phage defense-system scan + BGC proximity** (`./run_defensefinder_scan.sh <OUTDIR> [workers]`, submit via `bsub` like the others): runs DefenseFinder (protein mode, against Bakta's already-called `.faa`) on every `Bakta/<sample>/<sample>.faa` in a bacass OUTDIR, publishing per-sample results to `OUTDIR/defensefinder/<sample>/` plus a cross-sample `defensefinder_summary.tsv`. DefenseFinder (env + models) lives outside this repo, at `/work3/josne/miniconda3/envs/defensefinder` and `/work3/josne/Databases/defensefinder_models`; `hmmsearch` must be on `PATH` (the script prepends the env's `bin/`, since defense-finder invokes it as a bare command). ~48s/sample at 4 workers (protein-mode, no re-assembly). Motivated by Shomar et al. 2026 (*Cell Host & Microbe*, "A family of lanthipeptides with anti-phage function"), which found lanthipeptide BGCs enriched near defense systems in Actinobacteria — `bin/bgc_defense_proximity.py` joins this output against antiSMASH BGC calls (`<funcscan-outdir>/bgc/antismash/`) to compute the nearest defense system per BGC, in both gene-index distance (default window: ±23 genes, matching the paper) and bp distance. Gene-index numbering is derived from Bakta's `.tsv` (`type=="cds"` rows, file order) rather than DefenseFinder's own `hit_pos` column, but the two have been verified to match exactly — this lets the same indexing scheme be applied to BGC boundaries, which DefenseFinder never sees.
+
 ## Repository Layout
 
 ```
@@ -163,6 +165,7 @@ run_funcscan_aggregation.sh     # Standalone hamronize/ampcombi/MultiQC re-run f
 merge_bacass_batches.sh         # Merge multiple bacass OUTDIRs for a combined aggregation
 merge_funcscan_batches.sh       # Merge multiple funcscan OUTDIRs for a combined aggregation
 run_genomad_scan.sh             # geNomad plasmid/virus scan across a bacass OUTDIR's assemblies
+run_defensefinder_scan.sh       # DefenseFinder anti-phage defense-system scan across a bacass OUTDIR's Bakta proteomes
 conf/
   base.config                   # Resource labels
   lsf.config                    # LSF executor (perTaskReserve, pollInterval)
