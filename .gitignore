@@ -31,3 +31,5 @@ summary_MisuseReport.txt
 hpc_admin_email*.txt
 probe_*.out
 probe_*.err
+bgc_sideload_merge_*.out
+bgc_sideload_merge_*.err

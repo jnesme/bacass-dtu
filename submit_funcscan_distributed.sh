@@ -23,14 +23,16 @@
 #==========================================================================
 # EDIT THESE BEFORE SUBMITTING
 #==========================================================================
-INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_batch2.csv"
-OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_results_batch2"
+INPUT="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_samplesheet_test5.csv"
+OUTDIR="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/funcscan_results_test5"
 
 # Work directory — keep consistent between test and full run so -resume works.
 # Use a project-specific path so multiple projects don't share the same cache.
-# Separate from batch1's work_funcscan/ (that run is finished, results final) —
-# same pattern as Bacass_results_batch2 being kept separate from Bacass_results.
-FUNCSCAN_WORK="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/work_funcscan_batch2"
+# Fresh work dir for this 5-sample test (validates the antiSMASH-sideload BGC
+# subworkflow patch end-to-end, non-stub) — deliberately NOT reusing
+# work_funcscan_batch2 so there's no ambiguity about whether cached
+# pre-patch task results could be reused.
+FUNCSCAN_WORK="/work3/josne/Projects/Vibrio_Galathea3/vibrio_seq/work_funcscan_test5"
 
 # Screening modules — set to "true" or "false"
 RUN_BGC="true"   # BGC: antiSMASH, DeepBGC, GECCO
@@ -144,6 +146,10 @@ cp "${BACASS_DIR}/conf/funcscan_patches/combgc.nf" \
    "${NXF_HOME}/assets/nf-core/funcscan/modules/local/combgc.nf"
 cp "${BACASS_DIR}/conf/funcscan_patches/deepbgc_pipeline_main.nf" \
    "${NXF_HOME}/assets/nf-core/funcscan/modules/nf-core/deepbgc/pipeline/main.nf"
+cp "${BACASS_DIR}/conf/funcscan_patches/antismash_antismash_main.nf" \
+   "${NXF_HOME}/assets/nf-core/funcscan/modules/nf-core/antismash/antismash/main.nf"
+cp "${BACASS_DIR}/conf/funcscan_patches/bgc.nf" \
+   "${NXF_HOME}/assets/nf-core/funcscan/subworkflows/local/bgc.nf"
 
 # shellcheck disable=SC2086
 nextflow run nf-core/funcscan \
