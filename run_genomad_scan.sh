@@ -69,6 +69,11 @@ GENOMAD_DB="/work3/josne/Databases/genomad_db"
 [ -d "${GENOMAD_DB}" ] || { echo "ERROR: geNomad database not found at ${GENOMAD_DB}"; exit 1; }
 [ -d "${OUTDIR}/Unicycler" ] || { echo "ERROR: ${OUTDIR}/Unicycler not found"; exit 1; }
 
+# genomad invokes mmseqs as a bare command internally, not via absolute path,
+# so the env's bin/ must be on PATH — same class of fix as run_defensefinder_scan.sh's
+# hmmsearch. Without this, "end-to-end" dies immediately with "missing dependencies: mmseqs".
+export PATH="${GENOMAD_ENV}/bin:${PATH}"
+
 mapfile -t ASSEMBLIES < <(find "${OUTDIR}/Unicycler" -name "*.scaffolds.fa.gz" | sort)
 echo "=========================================="
 echo "geNomad scan"

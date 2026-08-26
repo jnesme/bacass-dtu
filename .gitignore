@@ -33,3 +33,5 @@ probe_*.out
 probe_*.err
 bgc_sideload_merge_*.out
 bgc_sideload_merge_*.err
+genomad_scan_*.out
+genomad_scan_*.err
