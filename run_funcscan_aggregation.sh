@@ -141,12 +141,27 @@ fi
 # *before* COMBGC ran (so it's not a "hadn't finished yet" issue). Could not
 # determine the exact mechanism — funcscan's own work dir (work_funcscan) and
 # the contemporaneous .nextflow.log are both gone, so there's no surviving
-# trace of what COMBGC actually received as input that run. The aggregate is
-# richer and internally consistent with data that was genuinely available;
-# regenerating from today's per-sample files would silently downgrade
-# already-published results. Until this is understood, leave
-# combgc_complete_summary.tsv untouched rather than risk overwriting good
-# data with bad — see project memory for the investigation writeup.
+# trace of what COMBGC actually received as input that run.
+#
+# Likely mechanism (surfaced Aug 2026 via direct feedback from an antiSMASH
+# core developer; UNCONFIRMED against this specific run): nf-core/funcscan's
+# COMBGC module doesn't read antiSMASH's native JSON results file. Instead it
+# parses antiSMASH's GenBank output (lossy — GenBank format can't represent
+# everything antiSMASH computes) plus a separately-parsed clusterblast text
+# output, then merges that against DeepBGC's and GECCO's own independently-
+# parsed output formats — rather than using the antiSMASH "sideload" format
+# DeepBGC/GECCO both provide, designed to feed their results *into* antiSMASH
+# so it emits one single self-consistent JSON. A three-source, format-
+# mismatched, home-grown merge like this is a plausible way to silently drop
+# rows depending on parse order or matching quirks, matching what we
+# observed — but this has not been verified against funcscan's actual
+# COMBGC source or the specific run in question.
+#
+# The aggregate is richer and internally consistent with data that was
+# genuinely available; regenerating from today's per-sample files would
+# silently downgrade already-published results. Until this is understood,
+# leave combgc_complete_summary.tsv untouched rather than risk overwriting
+# good data with bad — see project memory / CLAUDE.md for the writeup.
 # ============================================================
 echo ""
 echo "=== Step 3: combgc — SKIPPED (see script comment above) ==="
