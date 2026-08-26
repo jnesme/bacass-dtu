@@ -242,11 +242,23 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--bacass-outdir", required=True, help="Bacass results dir with Bakta/ and defensefinder/")
     ap.add_argument("--funcscan-outdir", required=True, help="Funcscan results dir with bgc/antismash/")
+    ap.add_argument(
+        "--antismash-subdir",
+        default="bgc/antismash",
+        help=(
+            "Subdir under --funcscan-outdir holding <sample>/*.region*.gbk, relative to "
+            "--funcscan-outdir. Default 'bgc/antismash' is antiSMASH's own (pre-sideload-fix) "
+            "output. Pass 'bgc/antismash_merged' to use run_bgc_sideload_merge.sh's corrected, "
+            "GECCO/DeepBGC-integrated output instead (see CLAUDE.md's BGC-merge caveat) — only "
+            "samples already processed by that script will be present, so a run against it "
+            "naturally covers whatever subset has finished so far."
+        ),
+    )
     ap.add_argument("--window-genes", type=int, default=23, help="Gene-index window for 'near' classification (default: 23, matching Shomar et al. 2026)")
     ap.add_argument("-o", "--output", required=True, help="Output TSV path")
     args = ap.parse_args()
 
-    antismash_root = os.path.join(args.funcscan_outdir, "bgc", "antismash")
+    antismash_root = os.path.join(args.funcscan_outdir, args.antismash_subdir)
     samples = sorted(
         d for d in os.listdir(antismash_root)
         if os.path.isdir(os.path.join(antismash_root, d))
