@@ -77,13 +77,29 @@ def summarize_sample(sample: str, json_path: Path) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--funcscan-outdir", required=True, help="Funcscan results dir (contains bgc/antismash_merged/)")
+    p.add_argument("--funcscan-outdir", required=True, help="Funcscan results dir")
+    p.add_argument(
+        "--antismash-subdir",
+        default="bgc/antismash_merged",
+        help=(
+            "Subdir under --funcscan-outdir holding <sample>/<sample>.json, relative to "
+            "--funcscan-outdir. Default 'bgc/antismash_merged' is run_bgc_sideload_merge.sh's "
+            "output tree (fixing an already-published, pre-patch OUTDIR). For a funcscan OUTDIR "
+            "produced by the live pipeline *with* the antiSMASH-sideload patch applied "
+            "(conf/funcscan_patches/bgc.nf), the merge already happened inline — pass 'bgc/antismash' "
+            "instead, since COMBGC's own summary can't see sideloaded regions (it only reads "
+            "antiSMASH's native `protocluster` features, which sideloaded areas never have — "
+            "confirmed by cross-checking a live pipeline run's combgc_complete_summary.tsv, which "
+            "was byte-identical to the pre-sideload run despite antiSMASH's own region count jumping "
+            "up to 8x)."
+        ),
+    )
     p.add_argument("-o", "--output", required=True, help="Output TSV path")
     args = p.parse_args(argv)
 
-    merged_dir = Path(args.funcscan_outdir) / "bgc" / "antismash_merged"
+    merged_dir = Path(args.funcscan_outdir) / args.antismash_subdir
     if not merged_dir.is_dir():
-        print(f"ERROR: {merged_dir} not found — run run_bgc_sideload_merge.sh first", file=sys.stderr)
+        print(f"ERROR: {merged_dir} not found — run run_bgc_sideload_merge.sh first, or check --antismash-subdir", file=sys.stderr)
         return 1
 
     all_rows = []
