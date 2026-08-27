@@ -138,9 +138,17 @@ SUMMARY="${GENOMAD_OUT}/genomad_summary.tsv"
         # (always exits 1 regardless of match) — use -vc (count) instead,
         # never -qv, for any invert-match boolean check on this HPC.
         has_conj="no"
-        n_conj=$(tail -n +2 "${pl}" | cut -f10 | grep -vc '^NA$' 2>/dev/null || echo 0)
+        # grep -c always prints a count (0 on no match) but still exits 1 in that
+        # case; under `set -e`, `var=$(... | grep -c ...)` alone would abort the
+        # script on a legitimate zero-match sample. `|| echo 0` is the wrong fix —
+        # it fires in ADDITION to grep's own printed "0", yielding "0\n0" and
+        # breaking the -gt test below. Use `|| true` (no extra output) instead.
+        n_conj=$(tail -n +2 "${pl}" | cut -f10 | { grep -vc '^NA$' || true; } 2>/dev/null)
         [ "${n_conj}" -gt 0 ] && has_conj="yes"
-        amr=$(tail -n +2 "${pl}" | cut -f11 | grep -v '^NA$' | tr '\n' ';' | sed 's/;$//')
+        # Same `pipefail` hazard as n_conj above: grep -v exits 1 when every row
+        # is NA (no AMR genes), which would kill the whole pipeline under
+        # pipefail even though "no matches" is a legitimate, common outcome here.
+        amr=$(tail -n +2 "${pl}" | cut -f11 | { grep -v '^NA$' || true; } | tr '\n' ';' | sed 's/;$//')
         [ -z "${amr}" ] && amr="NA"
 
         printf "%s\t%s\t%s\t%s\t%s\t%s\n" "${sample}" "${n_plasmids}" "${n_viruses}" "${largest}" "${has_conj}" "${amr}"
