@@ -38,6 +38,21 @@
 # script's Step 4 comment), so MultiQC reports "No analysis results found"
 # and produces no report.html at all.
 #
+# Bug found + fixed Sep 2026: SUBDIR_TOOLS was missing the raw AMP per-tool
+# output dirs (amp/ampir, amp/amplify, amp/macrel) entirely -- unlike the ARG
+# and BGC branches, which both merge their raw per-tool dirs AND their
+# combined/aggregate output (arg/abricate etc. + arg/hamronization/*;
+# bgc/deepbgc etc. + reports/combgc). AMP only had reports/ampcombi2 (the
+# already-parsed/filtered per-sample summary) merged, so any already-built
+# merged OUTDIR is missing the amp/<tool>/ raw predictions -- the final
+# Ampcombi_summary.tsv itself was NOT affected (it's regenerated fresh by
+# run_funcscan_aggregation.sh from reports/ampcombi2, which was always
+# correctly merged), but per-sample raw ampir/amplify/macrel output was
+# invisible in the merged view. Confirmed via the two real source batches on
+# disk (funcscan_results: 218 samples, funcscan_results_batch2: 83 samples,
+# each with exactly ampir/amplify/macrel under amp/, no stray non-sample
+# dirs) -- no SUBDIR_EXCLUDE entry needed for these three.
+#
 # Usage:
 #   ./merge_funcscan_batches.sh <TARGET_DIR> <BATCH_DIR_1> <BATCH_DIR_2> [...]
 # ============================================================================
@@ -70,6 +85,7 @@ fi
 SUBDIR_TOOLS=(
     arg/abricate arg/amrfinderplus arg/deeparg arg/fargene arg/rgi
     bgc/deepbgc bgc/gecco bgc/antismash
+    amp/ampir amp/amplify amp/macrel
     reports/ampcombi2 reports/combgc
     annotation/prokka annotation/bakta
 )
