@@ -2,11 +2,23 @@
 """
 bgc_defense_proximity.py
 
-For each antiSMASH-predicted BGC region, find the nearest DefenseFinder
-anti-phage defense system on the same contig, in both gene-index distance
-(matching Shomar et al. 2026, Cell Host & Microbe, "A family of
-lanthipeptides with anti-phage function" — that paper's window is +/-23
-genes) and bp distance.
+For each antiSMASH-predicted BGC region, find the nearest anti-phage defense
+system on the same contig, in both gene-index distance (matching Shomar et
+al. 2026, Cell Host & Microbe, "A family of lanthipeptides with anti-phage
+function" — that paper's window is +/-23 genes) and bp distance.
+
+Defense systems come from two independent callers, DefenseFinder and PADLOC
+(different HMM/model catalogs — PADLOC-DB vs MacSyFinder models), merged
+into one set of system instances tagged by which tool(s) called each one
+("DefenseFinder", "PADLOC", or "DefenseFinder;PADLOC") — the same
+tool-provenance approach bin/antismash_merged_summary.py already applies to
+BGC-calling tools, but merged here by gene-index range overlap on a shared
+contig rather than by antiSMASH's own subregion coordinates, since neither
+defense-finder tool's system boundaries are directly comparable coordinate
+systems otherwise. Deliberately doesn't try to match the two tools' system
+*names* (DefenseFinder's "RM_Type_I"/"Gabija"/"dGTPase" vs PADLOC's
+"RM_type_I"/"gabija"/"dXTPase" for what is empirically the same system on
+S0204) — gene-index overlap sidesteps that naming mismatch entirely.
 
 Gene-index numbering is derived from each sample's Bakta .tsv, filtered to
 type=="cds" and taken in file order. This has been verified to exactly
@@ -15,11 +27,18 @@ CDS-only file-order rank 43/44/45 for DMALBP_00215/00220/00225, and rank 486
 for DMALBP_02485 — both match hit_pos exactly), so a BGC's gene-index range
 is computed the same way for consistency, rather than trusting antiSMASH's
 own embedded locus tags (which include synthetic "allorf_START_END" ORFs
-that don't exist in Bakta's/DefenseFinder's locus-tag space).
+that don't exist in Bakta's/DefenseFinder's locus-tag space). PADLOC systems
+are joined through this same by_locus_tag mapping (via its "target.name"
+column, which holds Bakta locus tags directly) rather than PADLOC's own
+"relative.position" column, for the same consistency reason.
 
 Inputs (per sample <id>):
   - Bakta:          <bacass-outdir>/Bakta/<id>/<id>.tsv
   - DefenseFinder:  <bacass-outdir>/defensefinder/<id>/<id>_defense_finder_systems.tsv
+  - PADLOC:         <bacass-outdir>/padloc/<id>/<id>_padloc.csv (optional — missing
+                     file, e.g. a batch still in progress or a sample with zero
+                     PADLOC hits, degrades gracefully to DefenseFinder-only for
+                     that sample, same as a missing DefenseFinder file already does)
   - antiSMASH BGCs: <funcscan-outdir>/bgc/antismash/<id>/*.region*.gbk
 
 Output: one TSV row per BGC region, keyed by the same Record ID format used
@@ -71,7 +90,8 @@ def load_bakta_genes(bakta_tsv):
 
 
 def load_defense_systems(systems_tsv, by_locus_tag):
-    """Return list of dicts: sys_id, type, subtype, contig, gene_idx_min/max, bp_min/max."""
+    """Return list of dicts: sys_id, type, subtype, contig, gene_idx_min/max,
+    bp_min/max, source_tools (always {"DefenseFinder"} here)."""
     systems = []
     if not os.path.isfile(systems_tsv):
         return systems
@@ -100,8 +120,83 @@ def load_defense_systems(systems_tsv, by_locus_tag):
                 "gene_idx_max": max(gene_idxs),
                 "bp_min": min(starts),
                 "bp_max": max(stops),
+                "source_tools": {"DefenseFinder"},
             })
     return systems
+
+
+def load_padloc_systems(padloc_csv, by_locus_tag):
+    """Return list of dicts, same shape as load_defense_systems() (source_tools
+    always {"PADLOC"} here). PADLOC's CSV is one row per protein hit, not one
+    row per system (unlike DefenseFinder's systems.tsv) — grouped here by the
+    (seqid, system.number) pair PADLOC itself assigns to get one row per
+    system instance. Proteins are joined back to Bakta via "target.name"
+    (Bakta locus tags) through the same by_locus_tag mapping DefenseFinder
+    uses, not PADLOC's own "relative.position" column — see module docstring."""
+    groups = {}
+    if not os.path.isfile(padloc_csv):
+        return []
+    with open(padloc_csv, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            key = (row["seqid"], row["system.number"])
+            hit = by_locus_tag.get(row["target.name"])
+            if hit is None:
+                continue
+            contig, gi, start, stop = hit
+            g = groups.setdefault(key, {"type": row["system"], "gene_idxs": [], "starts": [], "stops": [], "contigs": set()})
+            g["gene_idxs"].append(gi)
+            g["starts"].append(start)
+            g["stops"].append(stop)
+            g["contigs"].add(contig)
+
+    systems = []
+    for (seqid, sys_number), g in groups.items():
+        if not g["gene_idxs"] or len(g["contigs"]) != 1:
+            continue
+        systems.append({
+            "sys_id": f"PADLOC_{seqid}_{sys_number}",
+            "type": g["type"],
+            "subtype": "NA",
+            "contig": g["contigs"].pop(),
+            "gene_idx_min": min(g["gene_idxs"]),
+            "gene_idx_max": max(g["gene_idxs"]),
+            "bp_min": min(g["starts"]),
+            "bp_max": max(g["stops"]),
+            "source_tools": {"PADLOC"},
+        })
+    return systems
+
+
+def merge_defense_systems(df_systems, padloc_systems):
+    """Merge DefenseFinder + PADLOC system calls into unified instances tagged
+    by source_tools. Two calls (one per tool) on the same contig are treated
+    as the same system instance when their gene-index ranges overlap —
+    defense-system operons are a handful of genes, so this is precise enough,
+    and sidesteps having to reconcile the two tools' different naming
+    conventions (see module docstring). On a merge, the combined instance
+    keeps DefenseFinder's sys_id/type/subtype as the primary label (already
+    what FINDINGS_dgtpase_pfa_synteny.md and prior analysis cite) and widens
+    its gene-index/bp range to cover both calls."""
+    merged = [dict(s) for s in df_systems]
+    for p in padloc_systems:
+        target = None
+        for m in merged:
+            if m["contig"] != p["contig"]:
+                continue
+            if p["gene_idx_max"] < m["gene_idx_min"] or m["gene_idx_max"] < p["gene_idx_min"]:
+                continue
+            target = m
+            break
+        if target is not None:
+            target["source_tools"] = target["source_tools"] | p["source_tools"]
+            target["gene_idx_min"] = min(target["gene_idx_min"], p["gene_idx_min"])
+            target["gene_idx_max"] = max(target["gene_idx_max"], p["gene_idx_max"])
+            target["bp_min"] = min(target["bp_min"], p["bp_min"])
+            target["bp_max"] = max(target["bp_max"], p["bp_max"])
+        else:
+            merged.append(dict(p))
+    return merged
 
 
 def bgc_gene_range(contig_genes, orig_start, orig_end):
@@ -193,12 +288,14 @@ def parse_bgc_gbk(gbk_path):
     return contig, region_start, region_end, core_start, core_end
 
 
-def process_sample(sample, bakta_tsv, systems_tsv, antismash_dir, window_genes, writer):
+def process_sample(sample, bakta_tsv, systems_tsv, padloc_csv, antismash_dir, window_genes, writer):
     if not os.path.isfile(bakta_tsv):
         print(f"WARNING: no Bakta tsv for {sample} at {bakta_tsv} — skipping", file=sys.stderr)
         return 0
     by_contig, by_locus_tag = load_bakta_genes(bakta_tsv)
-    systems = load_defense_systems(systems_tsv, by_locus_tag)
+    df_systems = load_defense_systems(systems_tsv, by_locus_tag)
+    padloc_systems = load_padloc_systems(padloc_csv, by_locus_tag)
+    systems = merge_defense_systems(df_systems, padloc_systems)
 
     n = 0
     for gbk_path in sorted(glob.glob(os.path.join(antismash_dir, "*.region*.gbk"))):
@@ -222,18 +319,19 @@ def process_sample(sample, bakta_tsv, systems_tsv, antismash_dir, window_genes, 
 
         if gi_min is None or not systems:
             writer.writerow(base_row + [gi_min or "NA", gi_max or "NA",
-                                         "NA", "NA", "NA", "NA", "NA", "no"])
+                                         "NA", "NA", "NA", "NA", "NA", "no", "NA"])
             n += 1
             continue
 
         result = nearest_defense_system(contig, gi_min, gi_max, orig_start, orig_end, systems)
         if result is None:
-            writer.writerow(base_row + [gi_min, gi_max, "NA", "NA", "NA", "NA", "NA", "no"])
+            writer.writerow(base_row + [gi_min, gi_max, "NA", "NA", "NA", "NA", "NA", "no", "NA"])
         else:
             gdist, bdist, sys_ = result
             within = "yes" if gdist <= window_genes else "no"
+            source_tools = ";".join(sorted(sys_["source_tools"]))
             writer.writerow(base_row + [gi_min, gi_max, sys_["sys_id"], sys_["type"], sys_["subtype"],
-                                         gdist, bdist, within])
+                                         gdist, bdist, within, source_tools])
         n += 1
     return n
 
@@ -271,7 +369,8 @@ def main():
               "bgc_core_start", "bgc_core_end",       # tight core_location boundary — used for all proximity calcs
               "bgc_gene_idx_min", "bgc_gene_idx_max",
               "nearest_defense_sys_id", "nearest_defense_type", "nearest_defense_subtype",
-              "defense_gene_distance", "defense_bp_distance", "within_window"]
+              "defense_gene_distance", "defense_bp_distance", "within_window",
+              "nearest_defense_source_tools"]
 
     total = 0
     with open(args.output, "w", newline="") as out_f:
@@ -280,8 +379,9 @@ def main():
         for i, sample in enumerate(samples, 1):
             bakta_tsv = os.path.join(args.bacass_outdir, "Bakta", sample, f"{sample}.tsv")
             systems_tsv = os.path.join(args.bacass_outdir, "defensefinder", sample, f"{sample}_defense_finder_systems.tsv")
+            padloc_csv = os.path.join(args.bacass_outdir, "padloc", sample, f"{sample}_padloc.csv")
             antismash_dir = os.path.join(antismash_root, sample)
-            n = process_sample(sample, bakta_tsv, systems_tsv, antismash_dir, args.window_genes, writer)
+            n = process_sample(sample, bakta_tsv, systems_tsv, padloc_csv, antismash_dir, args.window_genes, writer)
             total += n
             print(f"[{i}/{len(samples)}] {sample}: {n} BGC records", file=sys.stderr)
 

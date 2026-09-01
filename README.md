@@ -271,12 +271,13 @@ Final combined output: `reports/hamronization_summarize/hamronization_combined_r
 
 After funcscan's BGC branch has produced antiSMASH BGC calls, you can check which of those BGCs sit near a known bacterial anti-phage defense system (CRISPR-Cas, restriction-modification, and dozens of others). This is motivated by [Shomar et al. 2026](https://doi.org/10.1016/j.chom.2026.06.017) (*Cell Host & Microbe*, "A family of lanthipeptides with anti-phage function"), which found a clade of lanthipeptide BGCs in Actinobacteria strongly enriched near defense systems — several of which were experimentally confirmed to have genuine anti-phage activity themselves. This analysis reproduces the same style of BGC↔defense-system proximity screen on your own genomes.
 
-Two standalone tools are involved, run outside Nextflow, directly against a completed bacass + funcscan run:
+Three standalone tools are involved, run outside Nextflow, directly against a completed bacass + funcscan run:
 
 - **[DefenseFinder](https://github.com/mdmparis/defense-finder)** (`run_defensefinder_scan.sh`) detects defense systems from each sample's Bakta protein FASTA.
-- **`bin/bgc_defense_proximity.py`** joins those hits against antiSMASH's BGC coordinates to compute, per BGC, the nearest defense system in both gene-index distance (default window: ±23 genes, matching the paper) and bp distance.
+- **[PADLOC](https://github.com/padlocbio/padloc)** (`run_padloc_scan.sh`) does the same from a different, independent HMM/model catalog (PADLOC-DB vs. DefenseFinder's MacSyFinder models) — the two don't fully agree (on one test genome: 18 PADLOC systems vs. 13 DefenseFinder systems, with real overlap plus tool-specific calls each way), so running both gives a corroboration signal rather than trusting a single caller.
+- **`bin/bgc_defense_proximity.py`** merges both tools' hits (by gene-index range overlap per contig, not by name — the two tools label the same system differently, e.g. DefenseFinder's `RM_Type_I`/`dGTPase` vs. PADLOC's `RM_type_I`/`dXTPase`) and joins the result against antiSMASH's BGC coordinates to compute, per BGC, the nearest defense system in both gene-index distance (default window: ±23 genes, matching the paper) and bp distance.
 
-**Step 8a — Run DefenseFinder across your genomes**
+**Step 8a — Run DefenseFinder and PADLOC across your genomes**
 
 ```bash
 cd /path/to/your/project
@@ -284,9 +285,13 @@ cd /path/to/your/project
 bsub -q hpc -n 8 -R "span[hosts=1] rusage[mem=8GB]" -M 8500MB -W 06:00 \
   -o defensefinder_scan_%J.out -e defensefinder_scan_%J.err \
   /path/to/bacass/run_defensefinder_scan.sh /path/to/your/Bacass_results
+
+bsub -q hpc -n 4 -R "span[hosts=1] rusage[mem=2GB]" -M 2200MB -W 48:00 \
+  -o padloc_scan_%J.out -e padloc_scan_%J.err \
+  /path/to/bacass/run_padloc_scan.sh /path/to/your/Bacass_results
 ```
 
-This publishes per-sample results to `Bacass_results/defensefinder/<id>/` plus a cross-sample `defensefinder_summary.tsv`. DefenseFinder itself (env + models) is not part of this repo's conda-env bundle — see CLAUDE.md for where it lives and how to set it up.
+DefenseFinder publishes per-sample results to `Bacass_results/defensefinder/<id>/` plus a cross-sample `defensefinder_summary.tsv`. PADLOC publishes to `Bacass_results/padloc/<id>/` plus `padloc_summary.tsv`. Neither tool (env + models/database) is part of this repo's conda-env bundle — see CLAUDE.md for where they live and how to set them up, including a PADLOC-specific Bakta-pseudogene incompatibility that `run_padloc_scan.sh` works around automatically. PADLOC input to Step 8b is optional per sample — a sample not yet scanned (or with genuinely zero hits) degrades gracefully to DefenseFinder-only for that sample.
 
 **Step 8b — Join against antiSMASH BGC calls**
 
@@ -307,6 +312,7 @@ Output is one row per BGC region, keyed by the same `Record` ID format used by B
 | `defense_gene_distance` | Gene-index gap to that system (`0` = overlapping) |
 | `defense_bp_distance` | Same, in nucleotides |
 | `within_window` | `yes` if `defense_gene_distance <= --window-genes` |
+| `nearest_defense_source_tools` | Which tool(s) called that system: `DefenseFinder`, `PADLOC`, or `DefenseFinder;PADLOC` |
 
 ### Runtime estimates
 
