@@ -9,7 +9,9 @@
 ### -- all cores on one host --
 #BSUB -R "span[hosts=1] rusage[mem=16GB]"
 ### -- specify that we want the job to get killed if it exceeds 17 GB --
-#BSUB -M 17408MB
+### (must stay within 5% of rusage[mem=16GB]=16384MB, i.e. <=17203MB, or this
+### cluster's esub rejects the submission outright)
+#BSUB -M 17200MB
 ### -- set walltime limit: hh:mm --
 #BSUB -W 24:00
 ### -- set the email address --
@@ -54,6 +56,8 @@ BACASS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
     echo "Usage: $0 <OUTDIR> [threads]"
     echo "  OUTDIR   Bacass results directory containing Unicycler/*.scaffolds.fa.gz"
+    echo "           (or, for the preassembled-genome entry point with no Unicycler/"
+    echo "           dir, Bakta/<sample>/<sample>.fna is used as a fallback)"
     echo "  threads  Optional, passed to genomad end-to-end (default: 8)"
     exit 1
 }
@@ -67,14 +71,23 @@ GENOMAD_DB="/work3/josne/Databases/genomad_db"
 
 [ -x "${GENOMAD_ENV}/bin/genomad" ] || { echo "ERROR: geNomad env not found at ${GENOMAD_ENV}"; exit 1; }
 [ -d "${GENOMAD_DB}" ] || { echo "ERROR: geNomad database not found at ${GENOMAD_DB}"; exit 1; }
-[ -d "${OUTDIR}/Unicycler" ] || { echo "ERROR: ${OUTDIR}/Unicycler not found"; exit 1; }
 
 # genomad invokes mmseqs as a bare command internally, not via absolute path,
 # so the env's bin/ must be on PATH — same class of fix as run_defensefinder_scan.sh's
 # hmmsearch. Without this, "end-to-end" dies immediately with "missing dependencies: mmseqs".
 export PATH="${GENOMAD_ENV}/bin:${PATH}"
 
-mapfile -t ASSEMBLIES < <(find "${OUTDIR}/Unicycler" -name "*.scaffolds.fa.gz" | sort)
+# Preassembled-genome entry point (main_preassembled.nf) has no Unicycler/Dragonflye
+# assembler dir — fall back to Bakta's own re-emitted nucleotide FASTA, same fallback
+# already applied to bacass_to_funcscan.sh for this same entry point.
+ASSEMBLY_FROM_BAKTA=false
+if [ -d "${OUTDIR}/Unicycler" ]; then
+    mapfile -t ASSEMBLIES < <(find "${OUTDIR}/Unicycler" -name "*.scaffolds.fa.gz" | sort)
+else
+    echo "No Unicycler/ output found — assuming preassembled-genome entry point (main_preassembled.nf); using each sample's Bakta-annotated .fna as the assembly FASTA"
+    ASSEMBLY_FROM_BAKTA=true
+    mapfile -t ASSEMBLIES < <(find "${OUTDIR}/Bakta" -mindepth 2 -maxdepth 2 -name "*.fna" | sort)
+fi
 echo "=========================================="
 echo "geNomad scan"
 echo "Job started on $(date)"
@@ -83,7 +96,7 @@ echo "Assemblies found: ${#ASSEMBLIES[@]}"
 echo "Threads: ${THREADS}"
 echo "=========================================="
 if [ "${#ASSEMBLIES[@]}" -eq 0 ]; then
-    echo "ERROR: no *.scaffolds.fa.gz files found in ${OUTDIR}/Unicycler/"
+    echo "ERROR: no assembly FASTAs found (looked for ${OUTDIR}/Unicycler/*.scaffolds.fa.gz and ${OUTDIR}/Bakta/*/*.fna)"
     exit 1
 fi
 
@@ -96,22 +109,31 @@ trap 'rm -rf "${STAGING}"' EXIT
 i=0
 for asm in "${ASSEMBLIES[@]}"; do
     i=$((i + 1))
-    sample="$(basename "${asm}" .scaffolds.fa.gz)"
+    if [ "${ASSEMBLY_FROM_BAKTA}" = true ]; then
+        sample="$(basename "${asm}" .fna)"
+    else
+        sample="$(basename "${asm}" .scaffolds.fa.gz)"
+    fi
     echo ""
     echo "=== Sample ${i}/${#ASSEMBLIES[@]}: ${sample} ==="
 
-    if [ -f "${GENOMAD_OUT}/${sample}/${sample}.scaffolds_summary/${sample}.scaffolds_plasmid_summary.tsv" ]; then
+    if [ -f "${GENOMAD_OUT}/${sample}/${sample}.scaffolds_summary/${sample}.scaffolds_plasmid_summary.tsv" ] || \
+       [ -f "${GENOMAD_OUT}/${sample}/${sample}_summary/${sample}_plasmid_summary.tsv" ]; then
         echo "Already scanned, skipping"
         continue
     fi
 
-    fasta="${STAGING}/${sample}.scaffolds.fasta"
-    zcat "${asm}" > "${fasta}"
+    if [ "${ASSEMBLY_FROM_BAKTA}" = true ]; then
+        fasta="${asm}"
+    else
+        fasta="${STAGING}/${sample}.scaffolds.fasta"
+        zcat "${asm}" > "${fasta}"
+    fi
 
     "${GENOMAD_ENV}/bin/genomad" end-to-end "${fasta}" "${GENOMAD_OUT}/${sample}" "${GENOMAD_DB}" \
         --threads "${THREADS}" --quiet
 
-    rm -f "${fasta}"
+    [ "${ASSEMBLY_FROM_BAKTA}" = true ] || rm -f "${fasta}"
 done
 
 # ============================================================
@@ -124,9 +146,15 @@ SUMMARY="${GENOMAD_OUT}/genomad_summary.tsv"
 {
     printf "sample\tn_plasmids\tn_viruses\tlargest_plasmid_bp\thas_conjugation_genes\tamr_gene_families\n"
     for asm in "${ASSEMBLIES[@]}"; do
-        sample="$(basename "${asm}" .scaffolds.fa.gz)"
-        pl="${GENOMAD_OUT}/${sample}/${sample}.scaffolds_summary/${sample}.scaffolds_plasmid_summary.tsv"
-        vi="${GENOMAD_OUT}/${sample}/${sample}.scaffolds_summary/${sample}.scaffolds_virus_summary.tsv"
+        if [ "${ASSEMBLY_FROM_BAKTA}" = true ]; then
+            sample="$(basename "${asm}" .fna)"
+            pl="${GENOMAD_OUT}/${sample}/${sample}_summary/${sample}_plasmid_summary.tsv"
+            vi="${GENOMAD_OUT}/${sample}/${sample}_summary/${sample}_virus_summary.tsv"
+        else
+            sample="$(basename "${asm}" .scaffolds.fa.gz)"
+            pl="${GENOMAD_OUT}/${sample}/${sample}.scaffolds_summary/${sample}.scaffolds_plasmid_summary.tsv"
+            vi="${GENOMAD_OUT}/${sample}/${sample}.scaffolds_summary/${sample}.scaffolds_virus_summary.tsv"
+        fi
         [ -f "${pl}" ] || continue
 
         n_plasmids=$(($(wc -l < "${pl}") - 1))
