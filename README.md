@@ -314,6 +314,67 @@ Output is one row per BGC region, keyed by the same `Record` ID format used by B
 | `within_window` | `yes` if `defense_gene_distance <= --window-genes` |
 | `nearest_defense_source_tools` | Which tool(s) called that system: `DefenseFinder`, `PADLOC`, or `DefenseFinder;PADLOC` |
 
+### Alternative entry point: Preassembled genomes (skip assembly)
+
+If your genomes are **already assembled** — e.g. downloaded from NCBI — rather than needing assembly from raw reads, use `main_preassembled.nf` instead of the default `main.nf`. This entry point feeds FASTA straight into QC/annotation, skipping FastQC/FastP/Unicycler/Canu/Dragonflye entirely.
+
+- **Annotation is Bakta-only by design** — no Prokka/DFAST/LIFTOFF branch.
+- **Kraken2 and Kmerfinder don't run** — both are wired to raw reads, and there are none here. BUSCO completeness + QUAST + your source's own assembly QC (e.g. NCBI's submission QC) stand in.
+- Everything downstream is unchanged: **Steps 7 and 8 above** (funcscan screening, anti-phage defense-system proximity) work against this entry point's output with zero changes, since it publishes to the exact same `Bakta/<id>/`, `QUAST/`, `busco/` layout as a normal run.
+
+**Step P1 — (Optional) Bulk-download genomes from NCBI**
+
+If starting from an NCBI BioProject/assembly-details list rather than FASTA you already have:
+
+```bash
+cd /path/to/your/project
+
+python3 /path/to/bacass/bin/download_ncbi_assemblies.py \
+    -f assembly_details.txt \
+    -o . \
+    --delay 0.5
+```
+
+`assembly_details.txt` is the tab-separated report NCBI exports for a set of assemblies (Assembly accession, Level, WGS, Chrs, BioSample, **Strain**, Taxonomy columns). This downloads only genome FASTA (no GFF/protein — Bakta redoes annotation), writes `fasta/<ID>.fna.gz` per accession, and derives each `ID` from the `Strain` column (whitespace collapsed to `_`; duplicate resulting IDs are a fatal error). It also writes `samplesheet_preassembled.csv` directly — ready for Step P2 with no further editing.
+
+**Step P2 — Prepare a samplesheet**
+
+A 2-column CSV, `ID,Fasta` — skip this step entirely if you used Step P1, which writes it for you.
+
+```csv
+ID,Fasta
+sample1,/absolute/path/sample1.fna.gz
+sample2,/absolute/path/sample2.fasta
+```
+
+`Fasta` accepts `.fasta`/`.fa`/`.fna`, gzipped or not. Same `ID` constraints as the read-based samplesheet (letters/digits/hyphens/underscores only).
+
+**Step P3 — Edit and submit**
+
+```bash
+cp /path/to/bacass/submit_bacass_preassembled.sh /path/to/bacass/submit_bacass_preassembled_distributed.sh /path/to/your/project/
+```
+
+```bash
+#==========================================================================
+# EDIT THESE BEFORE SUBMITTING
+#==========================================================================
+INPUT="/absolute/path/to/samplesheet_preassembled.csv"
+OUTDIR="/absolute/path/to/results"
+#==========================================================================
+```
+
+No `ASSEMBLY_TYPE` to set — there's no assembly stage. `--annotation_tool bakta` is already baked into both submit scripts (required on the CLI even though this workflow always runs Bakta — it independently gates `conf/modules.config`'s resource/publishDir directives).
+
+```bash
+cd /path/to/your/project
+bsub < submit_bacass_preassembled_distributed.sh   # or submit_bacass_preassembled.sh for few samples
+```
+
+**Step P4 — Monitor / resume**
+
+Same as Steps 5–6 above — `bjobs -w`, `tail -f bacass_preassembled_head_*.out`, and resubmitting the same script picks up with `-resume` where it left off.
+
 ### Runtime estimates
 
 **Per-process time, bacass** (Vibrio genomes, ~5 Mb, short reads only). Measured Aug 2026 from a live 83-sample distributed run (`Bacass_results_batch2`), by parsing real task `started:`/`exited:` timestamps directly out of `.nextflow.log` — `timeline`/`report`/`trace` are deliberately disabled project-wide (see [Nextflow Reporting](../CLAUDE.md) — BeeGFS write overhead), so this is the way to get real per-task timing on this project. Excludes cached/resumed tasks (only real executions counted):

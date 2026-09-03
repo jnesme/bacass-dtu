@@ -1,0 +1,25 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/nf-core/bacass/master/assets/schema_input_preassembled.json",
+    "title": "nf-core/bacass pipeline - params.input schema (preassembled genomes)",
+    "description": "Schema for the samplesheet provided with params.input to main_preassembled.nf, for genomes that are already assembled (e.g. downloaded from NCBI) rather than assembled from reads.",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "ID": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "unique": true,
+                "errorMessage": "Sample name must be provided and cannot contain spaces",
+                "meta": ["id"]
+            },
+            "Fasta": {
+                "type": "string",
+                "pattern": "^\\S+\\.(fasta|fa|fna)(\\.gz)?$",
+                "errorMessage": "Path to an assembled genome FASTA (.fasta/.fa/.fna, optionally gzipped) must be provided"
+            }
+        },
+        "required": ["ID", "Fasta"]
+    }
+}

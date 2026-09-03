@@ -99,6 +99,21 @@ Default annotation tool (not Prokka). Full DB at `assets/databases/bakta_db/` (~
 - `conf/bakta_environment.yml` → overridden in `conf/modules.config`
 - `conf/gecco_environment.yml`, `conf/deepbgc_environment.yml` → overridden in `conf/funcscan_overrides.config`
 
+## Preassembled-Genome Entry Point (`main_preassembled.nf`)
+
+For genomes that are already assembled (e.g. downloaded from NCBI) rather than assembled here from reads — `workflows/bacass.nf` has no path for this (`--assembly_type` only accepts `short`/`long`/`hybrid`; there's no fasta samplesheet column). A separate, clearly-isolated entry point handles this instead, touching neither `main.nf` nor `workflows/bacass.nf`:
+
+**Input files stay out of the git repo.** Only the tooling (`bin/download_ncbi_assemblies.py`, `main_preassembled.nf`, `workflows/bacass_preassembled.nf`, submit scripts, schema) is tracked in this repo. The NCBI assembly-details TSV, the downloaded `fasta/*.fna.gz`, and the generated `samplesheet_preassembled.csv` all live in the project's own working directory (e.g. `/work3/josne/Projects/Vibrio_Galathea3/pseudoalteromonas_seq/`), same convention as `assets/databases/` — never pass a path under the bacass repo itself as `-o`/`--input`.
+
+- `bin/download_ncbi_assemblies.py -f <assembly_details.txt> -o <out_dir> [--delay SECONDS]` — bulk-downloads genome FASTA (only; no GFF/protein — Bakta redoes annotation) for every accession in an NCBI assembly-details TSV via the NCBI Datasets v2alpha REST API (same proven `_fetch_dataset`/`_extract_files` approach as `bin/download_reference.py`, generalized to loop many accessions). Sample IDs are derived from the `Strain` column (whitespace → `_`; duplicates are a fatal error). `<assembly_details.txt>` and `<out_dir>` are both expected to be paths in the project's working directory, not the repo. Writes `<out_dir>/fasta/<ID>.fna.gz` plus `<out_dir>/samplesheet_preassembled.csv` (`ID,Fasta`) — ready to hand straight to `main_preassembled.nf --input`.
+- `main_preassembled.nf` / `workflows/bacass_preassembled.nf` (`workflow BACASS_PREASSEMBLED`) — feeds the samplesheet directly into `ch_assembly`, the same `[meta, fasta]` channel shape `workflows/bacass.nf`'s assembler modules populate, then reuses the exact same downstream modules unchanged: `GUNZIP` → `QUAST` (plain mode) → `BUSCO_BUSCO` (`!params.skip_busco`) → `BAKTA_DBDOWNLOAD_RUN` (`!params.skip_annotation`; this entry point is **Bakta-only by design** — no Prokka/DFAST/LIFTOFF branch). Same `conf/base.config`/`conf/modules.config`/`conf/lsf.config` resource labels and publishDir conventions apply automatically (same process names), so output lands at `<outdir>/Bakta/<ID>/<ID>.faa` etc. exactly like a normal bacass run — every downstream script (`run_defensefinder_scan.sh`, `run_padloc_scan.sh`, `bin/bgc_defense_proximity.py`, `bacass_to_funcscan.sh`, `run_genomad_scan.sh`) works against it with **zero changes**.
+- **`--annotation_tool bakta` is required on the CLI, even though the workflow always runs Bakta unconditionally.** All of `conf/modules.config`'s Bakta resource/publishDir directives are wrapped in `if (params.annotation_tool == 'bakta') { ... }` (default is `'prokka'`) — config files evaluate before any workflow script body runs, so this can't be worked around from inside the workflow. Both submit scripts pass it explicitly.
+- **`withName` selectors for subworkflow-nested processes must use a single leading `.*`, not `.*:.*:`.** `workflows/bacass.nf` nests processes two workflow layers deep (`NFCORE_BACASS:BACASS:BAKTA_DBDOWNLOAD_RUN:BAKTA_BAKTA`), but `main_preassembled.nf` calls `BACASS_PREASSEMBLED` directly with no wrapper workflow — only one layer deep (`BACASS_PREASSEMBLED:BAKTA_DBDOWNLOAD_RUN:BAKTA_BAKTA`). All 8 `withName` selectors in `conf/modules.config` (`FASTQ_TRIM_FASTP_FASTQC:*`, `KMERFINDER_SUMMARY_DOWNLOAD:*`, `BAKTA_DBDOWNLOAD_RUN:*`) were fixed to `.*SUFFIX` (Sep 2026) so they match regardless of nesting depth.
+- **Found live, Sep 2026**: both of the above combined meant a real 143-genome run's `BAKTA_BAKTA` tasks ran on bare `process_medium` defaults (8 CPUs/40GB instead of 6/20GB, no `maxForks=8` cap — 14 ran concurrently instead of 8) and **published nothing** — `${outdir}/Bakta/` never got created; completed annotations sat only in the Nextflow `work/` dir. ~50 samples' worth of real Bakta compute (~15 min wall time each) had to be killed and rerun after the fix — cpus/memory/publishDir/maxForks directives don't affect Nextflow's `-resume` cache hash (only the process script/inputs do), so the already-completed work wasn't lost, just needed a correctly-configured resume pass to actually publish. **Lesson**: whenever a process is called through a differently-nested workflow wrapper than usual, verify its actual submitted resource request (`bjobs -l <jobid>`, check `-n`/`-R`) and confirm its `publishDir` output actually appears — don't assume `conf/modules.config` reuse is automatic just because process names match.
+- **Kraken2/kmerfinder are intentionally not run** — both are wired to raw reads in bacass, not to `ch_assembly`, and there are no reads for preassembled input. BUSCO completeness + QUAST + NCBI's own submission QC stand in. (Kraken2 could in principle classify assembly contigs directly as a future extension — not built.)
+- Submit via `submit_bacass_preassembled.sh` (single-node) or `submit_bacass_preassembled_distributed.sh` (LSF distributed, `-c conf/lsf.config`), mirroring `submit_bacass.sh`/`submit_bacass_distributed.sh` exactly, but invoking `nextflow run main_preassembled.nf` (not the bare project dir) and passing `--annotation_tool bakta`/`--baktadb`/`--busco_db_path` only (no `--assembly_type`/`--kraken2db`/`--kmerfinderdb`).
+- Validated Sep 2026 both via `-stub-run` (2-genome test: confirmed `GUNZIP` only fires on the `.gz` input, `QUAST` aggregates all samples into one `report` task, `BAKTA_BAKTA` receives the assembly — DAG wiring correct end-to-end) and a live 2-accession download against the real NCBI API. The `-stub-run` test did NOT catch the `annotation_tool`/`withName`-depth bug above since stub mode never inspects real `bjobs` resource requests or `publishDir` output — only a real run surfaced it.
+
 ## Funcscan (BGC/AMP/ARG Screening)
 
 Pipeline chain: bacass → [nf-core/funcscan](https://nf-co.re/funcscan/) v3.0.0 (separate run).
@@ -168,10 +183,13 @@ PADLOC and DefenseFinder use different model catalogs (PADLOC-DB vs MacSyFinder)
 
 ```
 main.nf / workflows/bacass.nf   # Entry point / main workflow
+main_preassembled.nf / workflows/bacass_preassembled.nf  # Entry point for already-assembled genomes (e.g. NCBI downloads)
 nextflow.config                 # Profiles, params defaults
 setup.sh                        # Conda + Nextflow env setup
 submit_bacass.sh                # Single-node LSF submit
 submit_bacass_distributed.sh    # Distributed LSF submit
+submit_bacass_preassembled.sh              # Single-node LSF submit, preassembled-genome entry point
+submit_bacass_preassembled_distributed.sh  # Distributed LSF submit, preassembled-genome entry point
 bacass_to_funcscan.sh           # Generate funcscan samplesheet
 submit_funcscan_distributed.sh  # Funcscan LSF submit
 run_bacass_aggregation.sh       # Standalone QUAST+Kmerfinder+MultiQC re-run from an OUTDIR
@@ -194,6 +212,8 @@ conf/
 modules/nf-core/                # DO NOT edit — use nf-core modules update/install
 modules/local/                  # 7 custom modules
 bin/                            # Python helpers + compare_assemblies_for_funcscan.sh
+  download_ncbi_assemblies.py   # Bulk NCBI genome-FASTA download + samplesheet for main_preassembled.nf
+assets/schema_input_preassembled.json  # Samplesheet schema (ID, Fasta) for main_preassembled.nf
 assets/databases/               # All databases (gitignored)
 .conda_envs/                    # Pre-built conda envs (gitignored)
 .nextflow_home/                 # NXF_HOME: pulled pipelines, plugins (gitignored)

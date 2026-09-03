@@ -43,9 +43,13 @@ for assembler in Unicycler Dragonflye; do
     fi
 done
 
+# main_preassembled.nf (NCBI-downloaded genomes) never runs an assembler, so there's no
+# Unicycler/Dragonflye dir — fall back to each sample's own Bakta-annotated .fna, which is
+# the exact sequence its .faa/.gff3 coordinates refer to.
+ASSEMBLY_FROM_BAKTA=false
 if [ -z "${ASSEMBLY_DIR}" ]; then
-    echo "ERROR: No assembly output found (looked for Unicycler/ and Dragonflye/ in ${RESULTS_DIR})"
-    exit 1
+    echo "No Unicycler/Dragonflye output found — assuming preassembled-genome entry point (main_preassembled.nf); using each sample's Bakta-annotated .fna as the assembly FASTA"
+    ASSEMBLY_FROM_BAKTA=true
 fi
 
 # Detect annotation tool (Bakta or Prokka)
@@ -79,12 +83,18 @@ for sample_dir in "${ANNO_DIR}"/*/; do
 
     # Find assembly FASTA (gzipped or plain)
     fasta=""
-    for pattern in "${sample}.scaffolds.fa.gz" "${sample}.scaffolds.fa" "${sample}.fa.gz" "${sample}.fa"; do
-        if [ -f "${ASSEMBLY_DIR}/${pattern}" ]; then
-            fasta="${ASSEMBLY_DIR}/${pattern}"
-            break
+    if [ "${ASSEMBLY_FROM_BAKTA}" = true ]; then
+        if [ -f "${sample_dir}${sample}.fna" ]; then
+            fasta="${sample_dir}${sample}.fna"
         fi
-    done
+    else
+        for pattern in "${sample}.scaffolds.fa.gz" "${sample}.scaffolds.fa" "${sample}.fa.gz" "${sample}.fa"; do
+            if [ -f "${ASSEMBLY_DIR}/${pattern}" ]; then
+                fasta="${ASSEMBLY_DIR}/${pattern}"
+                break
+            fi
+        done
+    fi
 
     # Find protein FASTA
     protein=""
