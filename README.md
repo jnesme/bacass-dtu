@@ -60,6 +60,39 @@ If Kmerfinder is invoked, the pipeline will group samples according to the [Kmer
 > [!NOTE]
 > This scenario is supported when [Kmerfinder](https://bitbucket.org/genomicepidemiology/kmerfinder/src/master/) analysis is performed only.
 
+#### KmerFinder-derived organism metadata for Bakta (confidence threshold)
+
+When Kmerfinder runs, its species call also feeds Bakta's `--genus`/`--species` flags (previously always
+empty, leaving every sample's `.gbff`/`.embl` with a blank `SOURCE`/`ORGANISM`). This only affects output
+metadata — confirmed against Bakta's own source that `--genus`/`--species` have no effect on gene calling,
+translation table, gram type, or locus-tag naming.
+
+Genus and species are gated differently, based on an empirical analysis of 301 real KmerFinder results
+(Sep 2026):
+
+- **Genus** is passed whenever Kmerfinder reports any top hit at all (i.e. not `"Unknown Species"`).
+  Genus-level agreement between a sample's top 3 Kmerfinder hits is nearly universal regardless of match
+  quality — **99.6% overall** (279/280 samples with ≥3 hits), and still **97%** even restricted to the
+  weakest hits (`Template_Coverage < 10%`, 35/36 samples). In a genus-dominated dataset this doesn't
+  discriminate real signal from noise, so gating on it would add complexity without adding confidence —
+  genus is left ungated.
+- **Species** is only passed when a **majority (≥2) of the top 3 Kmerfinder hits agree on the exact
+  species**, and that majority species matches the top hit. This threshold *does* discriminate: top-3
+  species-level majority agreement holds for **93%** of samples overall (261/280), but only **47%**
+  (17/36) among the weakest hits (`Template_Coverage < 10%`) — i.e. roughly half of weak-coverage calls
+  are genuinely corroborated by other close matches, and half are not (the top hit is essentially a
+  coin-flip among several similarly-weak, mutually-disagreeing candidates). Below this threshold, only
+  `--genus` is passed; `--species` and the taxonomy line are left blank, same as before this feature
+  existed.
+- A raw `Template_Coverage`/`Query_Coverage` cutoff was considered first and rejected: the same species
+  label can appear anywhere from ~1% to ~99% coverage depending on which specific reference genome
+  happened to be available in the database for that sample's strain, so a fixed numeric threshold
+  systematically misclassifies real cases in both directions. Majority agreement across independent
+  candidate hits is a materially better signal than any single hit's own coverage number.
+
+Implementation: `subworkflows/local/kmerfinder_summary_download/main.nf` (the `species_confident` check)
+and `conf/modules.config`'s `BAKTA_BAKTA` `ext.args` closure.
+
 ## Running on Your Own Samples (DTU HPC)
 
 This installation is self-contained for DTU HPC. Conda environments, databases, and submit scripts are bundled in the project directory. No manual environment setup is needed — the submit scripts handle everything automatically.
@@ -319,7 +352,10 @@ Output is one row per BGC region, keyed by the same `Record` ID format used by B
 If your genomes are **already assembled** — e.g. downloaded from NCBI — rather than needing assembly from raw reads, use `main_preassembled.nf` instead of the default `main.nf`. This entry point feeds FASTA straight into QC/annotation, skipping FastQC/FastP/Unicycler/Canu/Dragonflye entirely.
 
 - **Annotation is Bakta-only by design** — no Prokka/DFAST/LIFTOFF branch.
-- **Kraken2 and Kmerfinder don't run** — both are wired to raw reads, and there are none here. BUSCO completeness + QUAST + your source's own assembly QC (e.g. NCBI's submission QC) stand in.
+- **Kraken2 doesn't run** — it's wired to raw reads, and there are none here. **Kmerfinder does run**
+  (against the assembly itself, passed as both its "reads" and "consensus" input — `kmerfinder.py`
+  natively accepts FASTA), feeding the same `--genus`/`--species` Bakta metadata and confidence
+  threshold described above, plus a bonus by-reference-genome QUAST comparison.
 - Everything downstream is unchanged: **Steps 7 and 8 above** (funcscan screening, anti-phage defense-system proximity) work against this entry point's output with zero changes, since it publishes to the exact same `Bakta/<id>/`, `QUAST/`, `busco/` layout as a normal run.
 
 **Step P1 — (Optional) Bulk-download genomes from NCBI**

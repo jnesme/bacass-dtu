@@ -43,12 +43,21 @@ workflow {
             "or pass '--skip_annotation true' to skip annotation entirely."
         )
     }
+    if (!params.skip_kmerfinder && !params.kmerfinderdb) {
+        error(
+            "The Kmerfinder database argument is missing. Please supply '--kmerfinderdb <path>' " +
+            "or pass '--skip_kmerfinder true' to skip species identification. Kmerfinder runs " +
+            "against the assembly itself for this entry point (no reads needed) and its top hit " +
+            "feeds Bakta's --genus/--species metadata — see CLAUDE.md."
+        )
+    }
 
     // params.assembly_type is left at its nextflow.config default (null) here — CUSTOM_MULTIQC
     // passes it straight through to bin/multiqc_to_custom_csv.py's --assembly_type flag, whose
     // per-assembly-type branches only fire for exactly "short"/"long"/"hybrid" and silently no-op
     // otherwise (verified via -stub-run), which is the desired behaviour since this entry point
-    // never runs kmerfinder.
+    // has no assembly_type of its own (it's neither short/long/hybrid-assembled — the genome
+    // arrives pre-assembled) regardless of whether kmerfinder runs.
 
     //
     // Build ch_assembly directly from the (ID, Fasta) samplesheet
